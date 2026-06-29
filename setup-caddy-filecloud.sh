@@ -75,11 +75,11 @@ unzip -q main.zip
 cp -r server-preparation-main/filecloud/* .
 rm -rf main.zip server-preparation-main
 
-# --- Хеш пароля ---
+# --- Хеш пароля (используем новый синтаксис basic_auth) ---
 echo "[*] Генерируем хеш пароля для базовой аутентификации..."
 HASHED_PASSWORD=$(docker run --rm caddy:latest caddy hash-password --plaintext "$WEB_PASSWORD" 2>/dev/null | tail -1)
 
-# --- Caddyfile (с использованием образа с модулем Porkbun) ---
+# --- Caddyfile с новым синтаксисом и переменными ---
 cat > /opt/remnanode/caddy/Caddyfile <<EOF
 ${DOMAIN} {
     tls {
@@ -88,14 +88,20 @@ ${DOMAIN} {
             api_secret_key {$PORKBUN_SECRET}
         }
     }
-    basicauth {
+    basic_auth {
         ${WEB_USER} ${HASHED_PASSWORD}
     }
     reverse_proxy filecloud:8080
 }
 EOF
 
-# --- docker-compose.yml с образом, поддерживающим Porkbun ---
+# --- Создаём .env файл для docker-compose, чтобы передать ключи ---
+cat > /opt/remnanode/caddy/.env <<EOF
+PORKBUN_API_KEY=${PORKBUN_API_KEY}
+PORKBUN_SECRET=${PORKBUN_SECRET}
+EOF
+
+# --- docker-compose.yml (используем переменные из .env) ---
 cat > /opt/remnanode/caddy/docker-compose.yml <<EOF
 services:
   caddy:
@@ -109,8 +115,8 @@ services:
       - ./data:/data
       - ./config:/config
     environment:
-      - PORKBUN_API_KEY=${PORKBUN_API_KEY}
-      - PORKBUN_API_SECRET_KEY=${PORKBUN_SECRET}
+      - PORKBUN_API_KEY=\${PORKBUN_API_KEY}
+      - PORKBUN_SECRET=\${PORKBUN_SECRET}
 
   filecloud:
     image: python:3-alpine
@@ -135,18 +141,14 @@ echo "[*] Ожидаем получения сертификатов. Логи C
 echo "[*] Нажмите Ctrl+C, чтобы прервать ожидание (контейнеры продолжат работу)."
 echo ""
 
-# Путь к сертификатам
 CERT_DIR="/opt/remnanode/caddy/data/certificates/acme-v02.api.letsencrypt.org/directory/${DOMAIN}"
 CERT_FILE="${CERT_DIR}/${DOMAIN}.crt"
 KEY_FILE="${CERT_DIR}/${DOMAIN}.key"
 
-# Функция для вывода логов до момента появления сертификатов
 show_logs_and_wait() {
-    # Запускаем docker logs -f в фоне и сохраняем PID
     docker logs -f caddy &
     LOG_PID=$!
     
-    # Ждём появления файлов сертификатов
     while true; do
         if [[ -f "$CERT_FILE" && -f "$KEY_FILE" ]]; then
             echo ""
@@ -158,7 +160,6 @@ show_logs_and_wait() {
     done
 }
 
-# Перехватываем Ctrl+C, чтобы корректно завершить логи
 trap 'echo ""; echo "[!] Ожидание прервано пользователем."; kill $LOG_PID 2>/dev/null || true; exit 0' INT
 
 show_logs_and_wait
