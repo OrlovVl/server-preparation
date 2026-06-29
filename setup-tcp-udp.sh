@@ -69,10 +69,10 @@ fi
 # --- Полная очистка старых настроек sysctl ---
 echo "[*] Очищаем старые настройки sysctl..."
 cp /etc/sysctl.conf /etc/sysctl.conf.bak.$(date +%s)
-grep -vE '^(net\.ipv6\.conf\.(all|default|lo)\.disable_ipv6|net\.ipv4\.icmp_echo_ignore_all|net\.core\.default_qdisc|net\.ipv4\.tcp_congestion_control|net\.core\.rmem_max|net\.core\.wmem_max|net\.core\.rmem_default|net\.core\.wmem_default|net\.ipv4\.udp_rmem_min|net\.ipv4\.udp_wmem_min|net\.core\.netdev_max_backlog|net\.core\.somaxconn|net\.ipv4\.tcp_tw_reuse|net\.ipv4\.tcp_fin_timeout|net\.ipv4\.tcp_max_tw_buckets|net\.ipv4\.tcp_keepalive_time|net\.ipv4\.tcp_keepalive_intvl|net\.ipv4\.tcp_keepalive_probes|net\.ipv4\.tcp_syncookies|net\.ipv4\.tcp_max_syn_backlog|vm\.swappiness)' /etc/sysctl.conf > /etc/sysctl.conf.new
+grep -vE '^(net\.ipv6\.conf\.(all|default|lo)\.disable_ipv6|net\.core\.default_qdisc|net\.ipv4\.tcp_congestion_control|net\.core\.rmem_max|net\.core\.wmem_max|net\.core\.rmem_default|net\.core\.wmem_default|net\.ipv4\.udp_rmem_min|net\.ipv4\.udp_wmem_min|net\.core\.netdev_max_backlog|net\.core\.somaxconn|net\.ipv4\.tcp_tw_reuse|net\.ipv4\.tcp_fin_timeout|net\.ipv4\.tcp_max_tw_buckets|net\.ipv4\.tcp_keepalive_time|net\.ipv4\.tcp_keepalive_intvl|net\.ipv4\.tcp_keepalive_probes|net\.ipv4\.tcp_syncookies|net\.ipv4\.tcp_max_syn_backlog|vm\.swappiness)' /etc/sysctl.conf > /etc/sysctl.conf.new
 mv /etc/sysctl.conf.new /etc/sysctl.conf
 
-# --- Добавляем новые настройки (оптимизация для смешанного/UDP-трафика) ---
+# --- Добавляем новые настройки ---
 echo "[*] Добавляем настройки sysctl для работы с UDP и большими нагрузками..."
 cat << 'EOF' >> /etc/sysctl.conf
 
@@ -80,9 +80,6 @@ cat << 'EOF' >> /etc/sysctl.conf
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
-
-# Отключение ICMP
-net.ipv4.icmp_echo_ignore_all = 1
 
 # BBR
 net.core.default_qdisc = fq
@@ -124,9 +121,6 @@ echo "tcp_bbr" >> /etc/modules-load.d/modules.conf 2>/dev/null || true
 # --- Применение всех настроек sysctl ---
 sysctl -p /etc/sysctl.conf
 
-# --- Дополнительное принудительное включение ICMP (на случай, если не применилось из файла) ---
-sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null
-
 # --- UFW IPv6 ---
 [ -f /etc/default/ufw ] && sed -i 's/IPV6=yes/IPV6=no/g' /etc/default/ufw
 
@@ -135,7 +129,7 @@ if ! grep -q "nofile 65535" /etc/security/limits.conf; then
   echo -e "* soft nofile 65535\n* hard nofile 65535\nroot soft nofile 65535\nroot hard nofile 65535" >> /etc/security/limits.conf
 fi
 
-# --- UFW правила ---
+# --- Настройка UFW правил ---
 if command -v ufw >/dev/null 2>&1; then
   ufw default deny incoming
   ufw default allow outgoing
@@ -171,13 +165,25 @@ if command -v ufw >/dev/null 2>&1; then
     done
   fi
 
+  # --- Отключение ICMP через UFW ---
+  echo "[*] Настраиваем отключение ICMP (ping) через UFW..."
+  if [ -f /etc/ufw/before.rules ]; then
+    cp /etc/ufw/before.rules /etc/ufw/before.rules.bak.$(date +%s)
+    sed -i '/icmp --icmp-type echo-request -j/d' /etc/ufw/before.rules
+    sed -i '/^COMMIT/i -A ufw-before-input -p icmp --icmp-type echo-request -j DROP' /etc/ufw/before.rules
+    echo "[✓] Правило для ICMP обновлено (дубликаты удалены)."
+  else
+    echo "[!] Файл /etc/ufw/before.rules не найден. ICMP не отключён."
+  fi
+
   yes | ufw enable
+  ufw reload
 else
-  echo "[×] UFW не установлен. Пропускаем."
+  echo "[×] UFW не установлен. Пропускаем настройку файрвола."
 fi
 
 # --- Итоговая проверка ---
-echo -e "\n=== Настройка завершена! ===\n"
+echo -e "\n=== Настройка завершена ===\n"
 set +e
 
 echo "--- Проверка BBR ---"
@@ -185,7 +191,11 @@ BBR_SYSCTL=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3
 [ "$BBR_SYSCTL" = "bbr" ] && echo "[✓] BBR активен." || echo "[×] BBR не активирован."
 
 echo "--- Проверка ICMP ---"
-[ "$(sysctl -n net.ipv4.icmp_echo_ignore_all 2>/dev/null)" = "1" ] && echo "[✓] ICMP отключён." || echo "[×] ICMP не отключён."
+if grep -q "icmp --icmp-type echo-request -j DROP" /etc/ufw/before.rules 2>/dev/null; then
+  echo "[✓] ICMP отключён в UFW."
+else
+  echo "[×] ICMP не отключён в UFW (проверьте /etc/ufw/before.rules)."
+fi
 
 echo "--- Проверка IPv6 ---"
 [ "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null)" = "1" ] && echo "[✓] IPv6 отключён." || echo "[×] IPv6 не отключён (требуется перезагрузка)."
