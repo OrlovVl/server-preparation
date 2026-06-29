@@ -46,10 +46,14 @@ if [[ -z "$DOMAIN" || -z "$PORKBUN_API_KEY" || -z "$PORKBUN_SECRET" ]]; then
     exit 1
 fi
 
-# --- Удаление старых данных ---
+# --- Остановка и удаление старых контейнеров, если есть ---
 if [[ -d "/opt/remnanode/caddy" || -d "/opt/remnanode/filecloud" ]]; then
-    echo "[!] Обнаружены существующие директории. Переустановка..."
-    cd /opt/remnanode/caddy 2>/dev/null && docker-compose down 2>/dev/null || true
+    echo "[!] Обнаружены существующие директории. Останавливаем и удаляем старые контейнеры..."
+    cd /opt/remnanode/caddy 2>/dev/null && {
+        docker-compose down 2>/dev/null || true
+        cd /
+    }
+    echo "[*] Удаляем старые папки..."
     rm -rf /opt/remnanode/caddy /opt/remnanode/filecloud
 fi
 
@@ -61,9 +65,10 @@ if [[ -z "$WEB_PASSWORD" ]]; then
     WEB_PASSWORD=$(tr -dc 'A-Za-z0-9!@#$%^&*()_+-=' < /dev/urandom | head -c 32)
 fi
 WEB_USER="admin"
+echo "[*] Пароль для пользователя $WEB_USER: $WEB_PASSWORD"
 
 # --- Установка сайта-заглушки ---
-echo "[*] Устанавливаем FileCloud..."
+echo "[*] Устанавливаем FileCloud (простой HTTP-сервер)..."
 cd /opt/remnanode/filecloud
 wget -q https://github.com/OrlovVl/server-preparation/archive/refs/heads/main.zip -O main.zip
 unzip -q main.zip
@@ -71,9 +76,10 @@ cp -r server-preparation-main/filecloud/* .
 rm -rf main.zip server-preparation-main
 
 # --- Хеш пароля ---
+echo "[*] Генерируем хеш пароля для базовой аутентификации..."
 HASHED_PASSWORD=$(docker run --rm caddy:latest caddy hash-password --plaintext "$WEB_PASSWORD" 2>/dev/null | tail -1)
 
-# --- Caddyfile ---
+# --- Caddyfile (с использованием образа с модулем Porkbun) ---
 cat > /opt/remnanode/caddy/Caddyfile <<EOF
 ${DOMAIN} {
     tls {
@@ -89,11 +95,11 @@ ${DOMAIN} {
 }
 EOF
 
-# --- docker-compose.yml ---
+# --- docker-compose.yml с образом, поддерживающим Porkbun ---
 cat > /opt/remnanode/caddy/docker-compose.yml <<EOF
 services:
   caddy:
-    image: caddy:latest
+    image: srstone/caddy-porkbun:latest
     container_name: caddy
     restart: always
     ports:
@@ -119,35 +125,52 @@ EOF
 echo "$WEB_PASSWORD" > /opt/remnanode/caddy/.password
 chmod 600 /opt/remnanode/caddy/.password
 
-# --- Запуск ---
+# --- Запуск контейнеров ---
 cd /opt/remnanode/caddy
+echo "[*] Запускаем контейнеры через docker-compose..."
 docker-compose up -d
 
-# --- Ожидание сертификатов и создание ссылок ---
-echo "[*] Ожидаем получения сертификатов (до 60 сек)..."
+# --- Ожидание сертификатов с показом логов ---
+echo "[*] Ожидаем получения сертификатов. Логи Caddy будут выводиться в реальном времени."
+echo "[*] Нажмите Ctrl+C, чтобы прервать ожидание (контейнеры продолжат работу)."
+echo ""
+
+# Путь к сертификатам
 CERT_DIR="/opt/remnanode/caddy/data/certificates/acme-v02.api.letsencrypt.org/directory/${DOMAIN}"
 CERT_FILE="${CERT_DIR}/${DOMAIN}.crt"
 KEY_FILE="${CERT_DIR}/${DOMAIN}.key"
 
-WAIT=0
-TIMEOUT=60
-while [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; do
-    sleep 5
-    WAIT=$((WAIT+5))
-    if [ $WAIT -ge $TIMEOUT ]; then
-        echo "[!] Сертификаты не появились за $TIMEOUT сек. Проверьте логи: docker logs caddy"
-        echo "[!] Ссылки не созданы. Создайте вручную позже."
-        exit 0
-    fi
-    echo "[*] Ждём... $WAIT сек"
-done
+# Функция для вывода логов до момента появления сертификатов
+show_logs_and_wait() {
+    # Запускаем docker logs -f в фоне и сохраняем PID
+    docker logs -f caddy &
+    LOG_PID=$!
+    
+    # Ждём появления файлов сертификатов
+    while true; do
+        if [[ -f "$CERT_FILE" && -f "$KEY_FILE" ]]; then
+            echo ""
+            echo "[✓] Сертификаты получены!"
+            kill $LOG_PID 2>/dev/null || true
+            break
+        fi
+        sleep 2
+    done
+}
 
+# Перехватываем Ctrl+C, чтобы корректно завершить логи
+trap 'echo ""; echo "[!] Ожидание прервано пользователем."; kill $LOG_PID 2>/dev/null || true; exit 0' INT
+
+show_logs_and_wait
+
+# --- Создание симлинков ---
 mkdir -p /etc/ssl/certs /etc/ssl/private
 ln -sf "$CERT_FILE" /etc/ssl/certs/noctua.crt
 ln -sf "$KEY_FILE" /etc/ssl/private/noctua.key
 chmod 644 /etc/ssl/certs/noctua.crt
 chmod 600 /etc/ssl/private/noctua.key
 
+echo ""
 echo "[✓] Готово"
 echo "================================================================================"
 echo "[*] Заглушка: https://${DOMAIN} (через fallback Xray)"
