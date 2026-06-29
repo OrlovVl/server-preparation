@@ -8,7 +8,7 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# --- Установка нужных пакетов ---
+# --- Установка нужных пакетов (без Docker) ---
 apt-get update -qq
 for pkg in ufw curl wget; do
   if ! command -v $pkg &> /dev/null; then
@@ -111,6 +111,7 @@ else
   echo "[×] UFW не установлен. Пропускаем."
 fi
 
+# --- Итоговая проверка ---
 echo -e "\n=== Настройка завершена ===\n"
 set +e
 
@@ -119,7 +120,7 @@ BBR_SYSCTL=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3
 [ "$BBR_SYSCTL" = "bbr" ] && echo "[✓] BBR активен." || echo "[×] BBR не активирован."
 
 echo "--- Проверка ICMP ---"
-[ "$(sysctl -n net.ipv4.icmp_echo_ignore_all)" = "1" ] && echo "[✓] ICMP отключён." || echo "[×] ICMP не отключён."
+[ "$(sysctl -n net.ipv4.icmp_echo_ignore_all 2>/dev/null)" = "1" ] && echo "[✓] ICMP отключён." || echo "[×] ICMP не отключён."
 
 echo "--- Проверка IPv6 ---"
 [ "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null)" = "1" ] && echo "[✓] IPv6 отключён." || echo "[×] IPv6 не отключён (требуется перезагрузка)."
