@@ -1,14 +1,30 @@
 #!/bin/bash
 set -e
 
-echo "=== Старт настройки сервера для VLESS Reality ==="
+echo "=== Настройка сервера (TCP-оптимизация) ==="
 
 if [ "$EUID" -ne 0 ]; then
   echo "[×] Запускайте от root."
   exit 1
 fi
 
-# --- Установка нужных пакетов (без Docker) ---
+# --- Парсинг аргументов (доп. TCP-порты) ---
+TCP_PORTS=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --tcp-ports)
+      TCP_PORTS="$2"
+      shift 2
+      ;;
+    *)
+      echo "[×] Неизвестный параметр: $1"
+      echo "Использование: $0 [--tcp-ports 'порт1,порт2,...']"
+      exit 1
+      ;;
+  esac
+done
+
+# --- Установка нужных пакетов ---
 apt-get update -qq
 for pkg in ufw curl wget; do
   if ! command -v $pkg &> /dev/null; then
@@ -45,13 +61,14 @@ if [ "$CREATE_SWAP" = true ]; then
   echo "[✓] SWAP настроен."
 fi
 
-# --- sysctl ---
-echo "[*] Настраиваем sysctl (Reality + BBR + отключение IPv6/ICMP)..."
+# --- Полная очистка старых настроек sysctl ---
+echo "[*] Очищаем старые настройки sysctl..."
+cp /etc/sysctl.conf /etc/sysctl.conf.bak.$(date +%s)
+grep -vE '^(net\.ipv6\.conf\.(all|default|lo)\.disable_ipv6|net\.ipv4\.icmp_echo_ignore_all|net\.core\.default_qdisc|net\.ipv4\.tcp_congestion_control|net\.core\.rmem_max|net\.core\.wmem_max|net\.ipv4\.tcp_rmem|net\.ipv4\.tcp_wmem|net\.core\.netdev_max_backlog|net\.core\.somaxconn|net\.ipv4\.tcp_tw_reuse|net\.ipv4\.tcp_fin_timeout|net\.ipv4\.tcp_keepalive_time|net\.ipv4\.tcp_keepalive_intvl|net\.ipv4\.tcp_keepalive_probes|net\.ipv4\.tcp_syncookies|net\.ipv4\.tcp_max_syn_backlog|vm\.swappiness)' /etc/sysctl.conf > /etc/sysctl.conf.new
+mv /etc/sysctl.conf.new /etc/sysctl.conf
 
-sed -i '/# Отключение IPv6/,$d' /etc/sysctl.conf
-sed -i '/# Тюнинг сети/,$d' /etc/sysctl.conf
-sed -i '/# Отключение ICMP/,$d' /etc/sysctl.conf
-
+# --- Добавляем новые настройки ---
+echo "[*] Добавляем настройки sysctl для TCP-оптимизации..."
 cat << 'EOF' >> /etc/sysctl.conf
 
 # Отключение IPv6
@@ -62,10 +79,11 @@ net.ipv6.conf.lo.disable_ipv6 = 1
 # Отключение ICMP (ping)
 net.ipv4.icmp_echo_ignore_all = 1
 
-# Тюнинг сети для 1GB RAM (оптимально для Reality)
+# BBR + планировщик
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 
+# Стандартные буферы для TCP (1GB RAM)
 net.core.rmem_max = 8388608
 net.core.wmem_max = 8388608
 net.ipv4.tcp_rmem = 4096 87380 8388608
@@ -86,10 +104,11 @@ net.ipv4.tcp_max_syn_backlog = 2048
 vm.swappiness = 10
 EOF
 
-# --- BBR ---
+# --- BBR и применение ---
 modprobe tcp_bbr 2>/dev/null || true
 echo "tcp_bbr" >> /etc/modules-load.d/modules.conf 2>/dev/null || true
 sysctl -p /etc/sysctl.conf
+sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null
 
 # --- UFW IPv6 ---
 [ -f /etc/default/ufw ] && sed -i 's/IPV6=yes/IPV6=no/g' /etc/default/ufw
@@ -103,16 +122,31 @@ fi
 if command -v ufw >/dev/null 2>&1; then
   ufw default deny incoming
   ufw default allow outgoing
+  # Базовые порты
   ufw allow 22/tcp
   ufw allow 2222/tcp
-  ufw allow 443
+  ufw allow 443/tcp
+
+  # Дополнительные TCP-порты
+  if [ -n "$TCP_PORTS" ]; then
+    IFS=',' read -ra PORTS <<< "$TCP_PORTS"
+    for port in "${PORTS[@]}"; do
+      if [[ "$port" =~ ^[0-9]+$ ]]; then
+        ufw allow "$port"/tcp
+        echo "[*] Открыт TCP-порт $port"
+      else
+        echo "[!] Некорректный порт: $port (пропускаем)"
+      fi
+    done
+  fi
+
   yes | ufw enable
 else
   echo "[×] UFW не установлен. Пропускаем."
 fi
 
 # --- Итоговая проверка ---
-echo -e "\n=== Настройка завершена ===\n"
+echo -e "\n=== Настройка завершена! ===\n"
 set +e
 
 echo "--- Проверка BBR ---"
@@ -135,3 +169,5 @@ fi
 
 echo -e "\n--- Слушаемые порты ---"
 ss -tuln
+
+echo -e "\n[✓] Настройки оптимизированы для TCP-ориентированного трафика (например, TLS-туннели, WebSocket, gRPC)."
