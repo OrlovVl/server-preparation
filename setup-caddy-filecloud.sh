@@ -143,10 +143,10 @@ while [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; do
 done
 
 mkdir -p /etc/ssl/certs /etc/ssl/private
-ln -sf "$CERT_FILE" /etc/ssl/certs/vpn.crt
-ln -sf "$KEY_FILE" /etc/ssl/private/vpn.key
-chmod 644 /etc/ssl/certs/vpn.crt
-chmod 600 /etc/ssl/private/vpn.key
+ln -sf "$CERT_FILE" /etc/ssl/certs/noctua.crt
+ln -sf "$KEY_FILE" /etc/ssl/private/noctua.key
+chmod 644 /etc/ssl/certs/noctua.crt
+chmod 600 /etc/ssl/private/noctua.key
 
 echo "[✓] Готово"
 echo "================================================================================"
@@ -154,5 +154,5 @@ echo "[*] Заглушка: https://${DOMAIN} (через fallback Xray)"
 echo "[*] Логин: ${WEB_USER}"
 echo "[*] Пароль: ${WEB_PASSWORD} (сохранён в /opt/remnanode/caddy/.password)"
 echo "[*] Сертификаты: ${CERT_DIR}"
-echo "[*] Ссылки: /etc/ssl/certs/vpn.crt  и  /etc/ssl/private/vpn.key"
+echo "[*] Ссылки: /etc/ssl/certs/noctua.crt  и  /etc/ssl/private/noctua.key"
 echo "================================================================================"
