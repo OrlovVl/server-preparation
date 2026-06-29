@@ -104,10 +104,14 @@ net.ipv4.tcp_max_syn_backlog = 2048
 vm.swappiness = 10
 EOF
 
-# --- BBR и применение ---
+# --- Загрузка модуля BBR ---
 modprobe tcp_bbr 2>/dev/null || true
 echo "tcp_bbr" >> /etc/modules-load.d/modules.conf 2>/dev/null || true
+
+# --- Применение всех настроек sysctl ---
 sysctl -p /etc/sysctl.conf
+
+# --- Дополнительное принудительное включение ICMP (на случай, если не применилось из файла) ---
 sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null
 
 # --- UFW IPv6 ---
