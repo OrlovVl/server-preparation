@@ -1,29 +1,35 @@
 #!/bin/bash
 set -e
 
-echo "=== Старт настройки сервера ==="
+echo "=== Настройка сервера (UDP/TCP-оптимизация) ==="
 
 if [ "$EUID" -ne 0 ]; then
   echo "[×] Запускайте от root."
   exit 1
 fi
 
-# --- Парсинг аргументов ---
-GRPC_MODE=false
+# --- Парсинг аргументов (доп. TCP и UDP порты) ---
+TCP_PORTS=""
+UDP_PORTS=""
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --grpc) GRPC_MODE=true; shift ;;
-    *) echo "[×] Неизвестный параметр: $1"; exit 1 ;;
+    --tcp-ports)
+      TCP_PORTS="$2"
+      shift 2
+      ;;
+    --udp-ports)
+      UDP_PORTS="$2"
+      shift 2
+      ;;
+    *)
+      echo "[×] Неизвестный параметр: $1"
+      echo "Использование: $0 [--tcp-ports 'порт1,порт2,...'] [--udp-ports 'порт1,порт2,...']"
+      exit 1
+      ;;
   esac
 done
 
-if [ "$GRPC_MODE" = true ]; then
-  echo "[*] Режим комбо: Reality + Hysteria2 + gRPC (порт 8443 будет открыт)."
-else
-  echo "[*] Режим только Reality + Hysteria2 (порт 8443 не открывается)."
-fi
-
-# --- Установка пакетов (без Docker) ---
+# --- Установка пакетов ---
 apt-get update -qq
 for pkg in ufw curl wget; do
   if ! command -v $pkg &> /dev/null; then
@@ -31,7 +37,7 @@ for pkg in ufw curl wget; do
   fi
 done
 
-# --- SWAP ---
+# --- SWAP (2 ГБ) ---
 TARGET_SWAP_GB=2
 TARGET_SWAP_MB=$((TARGET_SWAP_GB * 1024))
 SWAP_FILE="/swapfile"
@@ -60,13 +66,14 @@ if [ "$CREATE_SWAP" = true ]; then
   echo "[✓] SWAP настроен."
 fi
 
-# --- sysctl ---
-echo "[*] Настраиваем sysctl для Hysteria2..."
+# --- Полная очистка старых настроек sysctl ---
+echo "[*] Очищаем старые настройки sysctl..."
+cp /etc/sysctl.conf /etc/sysctl.conf.bak.$(date +%s)
+grep -vE '^(net\.ipv6\.conf\.(all|default|lo)\.disable_ipv6|net\.ipv4\.icmp_echo_ignore_all|net\.core\.default_qdisc|net\.ipv4\.tcp_congestion_control|net\.core\.rmem_max|net\.core\.wmem_max|net\.core\.rmem_default|net\.core\.wmem_default|net\.ipv4\.udp_rmem_min|net\.ipv4\.udp_wmem_min|net\.core\.netdev_max_backlog|net\.core\.somaxconn|net\.ipv4\.tcp_tw_reuse|net\.ipv4\.tcp_fin_timeout|net\.ipv4\.tcp_max_tw_buckets|net\.ipv4\.tcp_keepalive_time|net\.ipv4\.tcp_keepalive_intvl|net\.ipv4\.tcp_keepalive_probes|net\.ipv4\.tcp_syncookies|net\.ipv4\.tcp_max_syn_backlog|vm\.swappiness)' /etc/sysctl.conf > /etc/sysctl.conf.new
+mv /etc/sysctl.conf.new /etc/sysctl.conf
 
-sed -i '/# Отключение IPv6/,$d' /etc/sysctl.conf
-sed -i '/# Тюнинг сети/,$d' /etc/sysctl.conf
-sed -i '/# Отключение ICMP/,$d' /etc/sysctl.conf
-
+# --- Добавляем новые настройки (оптимизация для смешанного/UDP-трафика) ---
+echo "[*] Добавляем настройки sysctl для работы с UDP и большими нагрузками..."
 cat << 'EOF' >> /etc/sysctl.conf
 
 # Отключение IPv6
@@ -81,7 +88,7 @@ net.ipv4.icmp_echo_ignore_all = 1
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 
-# Увеличенные буферы для UDP
+# Увеличенные буферы для UDP и больших объёмов данных
 net.core.rmem_max = 16777216
 net.core.wmem_max = 16777216
 net.core.rmem_default = 262144
@@ -93,7 +100,7 @@ net.ipv4.udp_wmem_min = 16384
 net.core.netdev_max_backlog = 10000
 net.core.somaxconn = 4096
 
-# TIME_WAIT
+# Ускоренное освобождение TIME_WAIT
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_fin_timeout = 15
 net.ipv4.tcp_max_tw_buckets = 2000000
@@ -110,10 +117,15 @@ net.ipv4.tcp_max_syn_backlog = 2048
 vm.swappiness = 10
 EOF
 
-# --- BBR ---
+# --- Загрузка модуля BBR ---
 modprobe tcp_bbr 2>/dev/null || true
 echo "tcp_bbr" >> /etc/modules-load.d/modules.conf 2>/dev/null || true
+
+# --- Применение всех настроек sysctl ---
 sysctl -p /etc/sysctl.conf
+
+# --- Дополнительное принудительное включение ICMP (на случай, если не применилось из файла) ---
+sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null
 
 # --- UFW IPv6 ---
 [ -f /etc/default/ufw ] && sed -i 's/IPV6=yes/IPV6=no/g' /etc/default/ufw
@@ -127,21 +139,45 @@ fi
 if command -v ufw >/dev/null 2>&1; then
   ufw default deny incoming
   ufw default allow outgoing
+  # Базовые порты (22, 2222, 443/tcp, 443/udp)
   ufw allow 22/tcp
   ufw allow 2222/tcp
   ufw allow 443/tcp
   ufw allow 443/udp
-  if [ "$GRPC_MODE" = true ]; then
-    ufw allow 8443/tcp  # для gRPC
-    echo "[*] Порт 8443/tcp открыт для gRPC."
+
+  # Дополнительные TCP-порты
+  if [ -n "$TCP_PORTS" ]; then
+    IFS=',' read -ra PORTS <<< "$TCP_PORTS"
+    for port in "${PORTS[@]}"; do
+      if [[ "$port" =~ ^[0-9]+$ ]]; then
+        ufw allow "$port"/tcp
+        echo "[*] Открыт TCP-порт $port"
+      else
+        echo "[!] Некорректный TCP-порт: $port (пропускаем)"
+      fi
+    done
   fi
+
+  # Дополнительные UDP-порты
+  if [ -n "$UDP_PORTS" ]; then
+    IFS=',' read -ra PORTS <<< "$UDP_PORTS"
+    for port in "${PORTS[@]}"; do
+      if [[ "$port" =~ ^[0-9]+$ ]]; then
+        ufw allow "$port"/udp
+        echo "[*] Открыт UDP-порт $port"
+      else
+        echo "[!] Некорректный UDP-порт: $port (пропускаем)"
+      fi
+    done
+  fi
+
   yes | ufw enable
 else
   echo "[×] UFW не установлен. Пропускаем."
 fi
 
 # --- Итоговая проверка ---
-echo -e "\n=== Настройка завершена ===\n"
+echo -e "\n=== Настройка завершена! ===\n"
 set +e
 
 echo "--- Проверка BBR ---"
@@ -164,3 +200,5 @@ fi
 
 echo -e "\n--- Слушаемые порты ---"
 ss -tuln
+
+echo -e "\n[✓] Настройки оптимизированы для смешанного трафика (TCP + UDP), включая QUIC и другие протоколы с большими пакетами."
