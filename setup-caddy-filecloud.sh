@@ -75,11 +75,11 @@ unzip -q main.zip
 cp -r server-preparation-main/filecloud/* .
 rm -rf main.zip server-preparation-main
 
-# --- Хеш пароля (используем новый синтаксис basic_auth) ---
+# --- Хеш пароля ---
 echo "[*] Генерируем хеш пароля для базовой аутентификации..."
 HASHED_PASSWORD=$(docker run --rm caddy:latest caddy hash-password --plaintext "$WEB_PASSWORD" 2>/dev/null | tail -1)
 
-# --- Caddyfile с новым синтаксисом и переменными ---
+# --- Caddyfile ---
 cat > /opt/remnanode/caddy/Caddyfile <<EOF
 ${DOMAIN} {
     tls {
@@ -95,13 +95,13 @@ ${DOMAIN} {
 }
 EOF
 
-# --- Создаём .env файл для docker-compose, чтобы передать ключи ---
+# --- .env файл для docker-compose ---
 cat > /opt/remnanode/caddy/.env <<EOF
 PORKBUN_API_KEY=${PORKBUN_API_KEY}
 PORKBUN_SECRET=${PORKBUN_SECRET}
 EOF
 
-# --- docker-compose.yml (используем переменные из .env) ---
+# --- docker-compose.yml ---
 cat > /opt/remnanode/caddy/docker-compose.yml <<EOF
 services:
   caddy:
@@ -152,7 +152,7 @@ show_logs_and_wait() {
     while true; do
         if [[ -f "$CERT_FILE" && -f "$KEY_FILE" ]]; then
             echo ""
-            echo "[✓] Сертификаты получены!"
+            echo "[✓] Сертификаты получены"
             kill $LOG_PID 2>/dev/null || true
             break
         fi
