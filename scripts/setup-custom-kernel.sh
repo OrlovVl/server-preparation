@@ -1,0 +1,149 @@
+#!/bin/bash
+set -e
+
+if [ "$EUID" -ne 0 ]; then
+    echo "[×] Запускайте от root."
+    exit 1
+fi
+
+# Проверка Docker
+if ! command -v docker &> /dev/null; then
+    echo "[!] Docker не установлен. Установите его: curl -fsSL https://get.docker.com | sh"
+    exit 1
+fi
+
+# Определяем команду docker compose (плагин или бинарник)
+if docker compose version &> /dev/null; then
+    DOCKER_COMPOSE="docker compose"
+elif command -v docker-compose &> /dev/null; then
+    DOCKER_COMPOSE="docker-compose"
+else
+    echo "[!] docker compose (или docker-compose) не установлен. Установите отдельно."
+    exit 1
+fi
+
+# Установка wget и unzip (если нет)
+for pkg in wget unzip; do
+    if ! command -v "$pkg" &> /dev/null; then
+        echo "[*] Устанавливаем $pkg..."
+        apt-get update
+        apt-get install -y "$pkg"
+    fi
+done
+
+# Парсинг аргументов
+KERNEL_VERSION=""
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --version|-v)
+            KERNEL_VERSION="$2"
+            shift 2
+            ;;
+        --help|-h)
+            echo "Использование: $0 --version <версия>"
+            echo "Пример: $0 --version 26.6.27"
+            exit 0
+            ;;
+        *)
+            echo "[×] Неизвестный параметр: $1"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "$KERNEL_VERSION" ]]; then
+    echo "[×] Укажите версию: --version 26.6.27"
+    exit 1
+fi
+
+# Проверка наличия /opt/remnanode и docker-compose.yml
+if [[ ! -d "/opt/remnanode" || ! -f "/opt/remnanode/docker-compose.yml" ]]; then
+    echo "[×] /opt/remnanode/docker-compose.yml не найден. Сначала выполните setup-node.sh."
+    exit 1
+fi
+
+cd /opt/remnanode
+
+# Остановка контейнера
+echo "[*] Останавливаем remnanode..."
+$DOCKER_COMPOSE down
+
+# Скачивание Xray
+URL="https://github.com/XTLS/Xray-core/releases/download/v${KERNEL_VERSION}/Xray-linux-64.zip"
+ZIP_FILE="/tmp/Xray-linux-64.zip"
+XRAY_BIN="/var/lib/remnanode/xray"
+
+echo "[*] Скачиваем Xray-core ${KERNEL_VERSION}..."
+wget --show-progress -O "$ZIP_FILE" "$URL"
+
+if [[ ! -s "$ZIP_FILE" ]]; then
+    echo "[×] Ошибка: файл $ZIP_FILE пуст или не скачался."
+    exit 1
+fi
+
+echo "[*] Распаковываем в /var/lib/remnanode..."
+mkdir -p /var/lib/remnanode
+unzip -o "$ZIP_FILE" xray -d /var/lib/remnanode/
+
+if [[ ! -f "$XRAY_BIN" ]]; then
+    echo "[×] Ошибка: бинарник xray не найден после распаковки."
+    exit 1
+fi
+
+chmod +x "$XRAY_BIN"
+rm -f "$ZIP_FILE"
+
+# --- Работа с volume (без yq) ---
+COMPOSE_FILE="docker-compose.yml"
+MOUNT_LINE="      - /var/lib/remnanode/xray:/usr/local/bin/xray:ro"
+
+echo "[*] Проверяем наличие монтирования xray..."
+
+if grep -q "$MOUNT_LINE" "$COMPOSE_FILE"; then
+    echo "[✓] Монтирование уже присутствует. Пропускаем."
+else
+    echo "[*] Добавляем монтирование в docker-compose.yml..."
+
+    # Создаём бэкап
+    cp "$COMPOSE_FILE" "$COMPOSE_FILE.bak"
+
+    if grep -q "^    volumes:" "$COMPOSE_FILE"; then
+        # Секция volumes уже есть – добавляем строку в конец блока volumes
+        # Ищем блок от "    volumes:" до следующей строки с отступом 2 пробела (закрытие секции)
+        sed -i "/^    volumes:/,/^  / {
+            /^  / i\\
+$MOUNT_LINE
+        }" "$COMPOSE_FILE"
+    else
+        # Секции volumes нет – дописываем в конец файла
+        echo "    volumes:" >> "$COMPOSE_FILE"
+        echo "$MOUNT_LINE" >> "$COMPOSE_FILE"
+    fi
+
+    # Проверяем синтаксис compose-файла
+    if ! $DOCKER_COMPOSE config &> /dev/null; then
+        echo "[×] Ошибка в docker-compose.yml после добавления volume. Восстанавливаем бэкап..."
+        mv "$COMPOSE_FILE.bak" "$COMPOSE_FILE"
+        exit 1
+    fi
+    rm -f "$COMPOSE_FILE.bak"
+
+    echo "[✓] Монтирование добавлено."
+fi
+
+# Запуск контейнера
+echo "[*] Запускаем remnanode..."
+$DOCKER_COMPOSE up -d
+
+sleep 8
+
+# Вывод логов
+echo "[*] Последние 50 строк логов:"
+$DOCKER_COMPOSE logs --tail=50
+
+echo ""
+echo "[✓] Готово, Xray-core ${KERNEL_VERSION} установлен."
+echo "[*] Проверьте выведенные логи для подтверждения корректности работы."
+echo "[*] Проверка версии: docker exec remnanode /usr/local/bin/xray version"
+echo "================================================================================"
+exit 0
