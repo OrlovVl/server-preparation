@@ -40,7 +40,7 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-# --- Установка зависимостей (wget, unzip, curl) ---
+# --- Установка пакетов ---
 apt-get update
 for pkg in wget unzip curl; do
     if ! command -v "$pkg" &> /dev/null; then
@@ -114,7 +114,7 @@ echo "[*] Пароль для пользователя $WEB_USER: $WEB_PASSWORD"
 # --- Установка сайта-заглушки ---
 echo "[*] Устанавливаем FileCloud (простой HTTP-сервер)..."
 cd /opt/remnanode/filecloud
-wget --show-progress -O main.zip https://github.com/OrlovVl/server-preparation/archive/refs/heads/main.zip
+wget --tries=5 --waitretry=10 --show-progress -O main.zip https://github.com/OrlovVl/server-preparation/archive/refs/heads/main.zip
 unzip -o main.zip
 cp -r server-preparation-main/filecloud/* .
 rm -rf main.zip server-preparation-main
@@ -178,7 +178,7 @@ chmod 600 /opt/remnanode/caddy/.password
 
 # --- Запуск контейнеров ---
 cd /opt/remnanode/caddy
-echo "[*] Запускаем контейнеры через $DOCKER_COMPOSE..."
+echo "[*] Запускаем контейнеры..."
 $DOCKER_COMPOSE up -d
 
 # --- Ожидание сертификатов с показом логов ---

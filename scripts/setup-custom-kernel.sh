@@ -69,7 +69,7 @@ else
     exit 1
 fi
 
-# Установка wget и unzip (если нет)
+# Установка пакетов
 for pkg in wget unzip; do
     if ! command -v "$pkg" &> /dev/null; then
         echo "[*] Устанавливаем $pkg..."
@@ -121,7 +121,7 @@ ZIP_FILE="/tmp/Xray-linux-64.zip"
 XRAY_BIN="/var/lib/remnanode/xray"
 
 echo "[*] Скачиваем Xray-core ${KERNEL_VERSION}..."
-wget --show-progress -O "$ZIP_FILE" "$URL"
+wget --tries=5 --waitretry=10 --show-progress -O "$ZIP_FILE" "$URL"
 
 if [[ ! -s "$ZIP_FILE" ]]; then
     echo "[×] Ошибка: файл $ZIP_FILE пуст или не скачался."

@@ -30,16 +30,18 @@ run_script() {
     shift
     local args="$@"
     echo "[*] Загружаем и выполняем: $url"
+    local ret=0
     if [ -z "$args" ]; then
-        curl -fsSL "$url" | bash
+        curl -fsSL --retry 5 --retry-delay 10 "$url" | bash || ret=$?
     else
-        curl -fsSL "$url" | bash -s -- $args
+        curl -fsSL --retry 5 --retry-delay 10 "$url" | bash -s -- $args || ret=$?
     fi
-    if [ $? -eq 0 ]; then
+    if [ $ret -eq 0 ]; then
         echo "[✓] Выполнение завершено успешно."
     else
-        echo "[×] Ошибка при выполнении. Проверьте логи."
+        echo "[×] Ошибка при выполнении (код $ret). Проверьте логи."
     fi
+    return 0
 }
 
 # --- Функции запроса параметров ---

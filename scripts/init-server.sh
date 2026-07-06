@@ -28,8 +28,6 @@ echo "[*] Обновляем список пакетов и устанавлив
 apt-get update
 if ! command -v curl &> /dev/null; then
   apt-get install -y curl
-else
-  echo "  - curl уже установлен."
 fi
 
 # --- 1. Остановка всех служб Docker ---
@@ -83,7 +81,7 @@ safe_run "apt-get clean" "Очистка кэша apt"
 
 # --- 6. Установка Docker через официальный скрипт ---
 echo "[*] Устанавливаем Docker через официальный скрипт..."
-if curl -fL https://get.docker.com | sh; then
+if curl -fL --retry 5 --retry-delay 10 https://get.docker.com | sh; then
   echo "[✓] Docker установлен успешно."
 else
   echo "[×] Ошибка установки Docker. Прерываем выполнение."
@@ -107,7 +105,7 @@ fi
 # --- 9. Проверка и установка docker-compose (если отсутствует) ---
 echo "[*] Проверяем наличие docker compose..."
 if docker compose version; then
-  echo "[✓] docker compose (современный плагин V2) уже установлен скриптом Docker."
+  echo "[✓] docker compose уже установлен скриптом Docker."
 elif command -v docker-compose; then
   echo "[✓] Найдена старая версия docker-compose (бинарник)."
 else
@@ -116,7 +114,7 @@ else
   OS=$(uname -s | tr '[:upper:]' '[:lower:]')
   ARCH=$(uname -m)
   URL="https://github.com/docker/compose/releases/latest/download/docker-compose-${OS}-${ARCH}"
-  if curl -L "$URL" -o /usr/local/bin/docker-compose; then
+  if curl -L --retry 5 --retry-delay 10 "$URL" -o /usr/local/bin/docker-compose; then
     chmod +x /usr/local/bin/docker-compose
     echo "[✓] docker-compose успешно установлен вручную в /usr/local/bin/."
   else
@@ -125,9 +123,9 @@ else
   fi
 fi
 
-# --- 10. Финальная проверка обеих команд ---
+# --- 10. Проверка обеих команд ---
 echo ""
-echo "=== ФИНАЛЬНЫЙ СТАТУС СИСТЕМЫ ==="
+echo "=== Проверка успешной установки Docker и Docker Compose ==="
 docker --version
 
 if docker compose version; then

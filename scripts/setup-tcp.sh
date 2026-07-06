@@ -22,7 +22,7 @@ run_rollback() {
   local profile="$1"
   local url="${ROLLBACK_URL_BASE}/rollback-${profile}.sh"
   echo "[*] Загружаем rollback-${profile}.sh с GitHub..."
-  if curl -fsSL "$url" | bash -s; then
+  if curl -fsSL --retry 5 --retry-delay 10 "$url" | bash -s; then
     echo "[✓] Откат '$profile' выполнен."
     return 0
   else
@@ -303,24 +303,25 @@ fi
 
 # --- Настройка UFW правил ---
 if command -v ufw >/dev/null 2>&1; then
-  ufw default deny incoming
-  ufw default allow outgoing
+  ufw default deny incoming || true
+  ufw default allow outgoing || true
+  
   # Определяем текущий SSH порт (если изменён)
-  SSH_PORT=$(grep -E "^Port " /etc/ssh/sshd_config | awk '{print $2}' | head -1)
+  SSH_PORT=""
+  if [ -f /etc/ssh/sshd_config ]; then
+    SSH_PORT=$(grep -E "^Port " /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1) || true
+  fi
   [ -z "$SSH_PORT" ] && SSH_PORT=22
 
-  # Разрешаем SSH по номеру порта (на случай, если порт нестандартный)
-  ufw allow "$SSH_PORT"/tcp
-  # Также разрешаем по имени сервиса (для надёжности)
-  ufw allow ssh
-  ufw allow 2222/tcp
-  ufw allow 443/tcp
+  yes | ufw allow "$SSH_PORT"/tcp || true
+  ufw allow 2222/tcp || true
+  ufw allow 443/tcp || true
 
   if [ -n "$TCP_PORTS" ]; then
     IFS=',' read -ra PORTS <<< "$TCP_PORTS"
     for port in "${PORTS[@]}"; do
       if [[ "$port" =~ ^[0-9]+$ ]]; then
-        ufw allow "$port"/tcp
+        ufw allow "$port"/tcp || true
         echo "[*] Открыт TCP-порт $port"
       else
         echo "[!] Некорректный порт: $port (пропускаем)"
@@ -344,13 +345,20 @@ if command -v ufw >/dev/null 2>&1; then
       echo "[!] /etc/ufw/before.rules не найден. ICMP не отключён."
   fi
 
-  yes | ufw enable
-  ufw reload
+  if yes | ufw enable; then
+    echo "[✓] UFW включён."
+  else
+    echo "[!] Не удалось включить UFW (возможно, уже включён)."
+  fi
+  if ufw reload; then
+    echo "[✓] Правила UFW перезагружены."
+  else
+    echo "[!] Ошибка при перезагрузке UFW. Проверьте правила вручную."
+  fi
 else
   echo "[×] UFW не установлен. Пропускаем настройку файрвола."
 fi
 
-# --- Итог ---
 echo -e "\n=== Настройка завершена ===\n"
 set +e
 echo "--- Проверка BBR ---"
