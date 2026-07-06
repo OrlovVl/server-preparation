@@ -325,6 +325,7 @@ if command -v ufw >/dev/null 2>&1; then
   fi
   [ -z "$SSH_PORT" ] && SSH_PORT=22
 
+  yes | ufw allow "$SSH_PORT"/tcp || true
   ufw allow 2222/tcp || true
   ufw allow 443/tcp || true
   ufw allow 443/udp || true
