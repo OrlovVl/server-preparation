@@ -1,4 +1,5 @@
 #!/bin/bash
+set -o pipefail
 set -e
 
 # --- Проверка прав root ---
@@ -63,7 +64,18 @@ cleanup() {
         echo "[*] Контейнер уже запущен, оставляем его работающим."
     else
         echo "[*] Контейнер ещё не запущен, останавливаем и удаляем созданные ресурсы..."
-        cd /opt/remnanode 2>/dev/null && $DOCKER_COMPOSE down &>/dev/null || true
+        # Останавливаем и удаляем контейнер через docker compose, если есть compose-файл
+        if [ -f "/opt/remnanode/docker-compose.yml" ]; then
+            cd /opt/remnanode && $DOCKER_COMPOSE down || true
+        fi
+        # Удаляем docker-compose.yml, если он существует
+        if [ -f "/opt/remnanode/docker-compose.yml" ]; then
+            rm -f /opt/remnanode/docker-compose.yml
+        fi
+        # Удаляем папку /opt/remnanode, если она пуста (проверяем, что она существует и внутри нет файлов)
+        if [ -d "/opt/remnanode" ] && [ -z "$(ls -A /opt/remnanode 2>/dev/null)" ]; then
+            rm -rf /opt/remnanode
+        fi
         echo "[✓] Очистка выполнена."
     fi
     exit 1
@@ -77,8 +89,8 @@ mkdir -p /opt/remnanode
 # --- Остановка и удаление старого контейнера (если есть) ---
 if docker ps -a --format '{{.Names}}' | grep -q "^remnanode$"; then
     echo "[*] Останавливаем и удаляем старый контейнер remnanode..."
-    docker stop remnanode &>/dev/null || true
-    docker rm remnanode &>/dev/null || true
+    docker stop remnanode || true
+    docker rm remnanode || true
 fi
 
 # --- Создание docker-compose.yml ---
@@ -112,7 +124,7 @@ echo "[*] Ожидаем запуска контейнера remnanode (Ctrl+C �
 TIMEOUT=120
 ELAPSED=0
 while [ $ELAPSED -lt $TIMEOUT ]; do
-    STATUS=$(docker inspect --format='{{.State.Status}}' remnanode 2>/dev/null)
+    STATUS=$(docker inspect --format='{{.State.Status}}' remnanode)
     if [ "$STATUS" = "running" ]; then
         echo ""
         echo "[✓] Контейнер remnanode успешно запущен."
@@ -135,7 +147,7 @@ if [ $ELAPSED -ge $TIMEOUT ]; then
     exit 1
 fi
 
-# Если дошли сюда, контейнер запущен — отключаем trap (чтобы при повторном Ctrl+C не вызывал очистку)
+# --- Снимаем trap после успешного выполнения ---
 trap - INT TERM
 
 # --- Итоговая информация ---

@@ -1,10 +1,57 @@
 #!/bin/bash
+set -o pipefail
 set -e
 
 if [ "$EUID" -ne 0 ]; then
     echo "[×] Запускайте от root."
     exit 1
 fi
+
+# Функция очистки при прерывании
+cleanup_custom() {
+    echo ""
+    echo "[!] Выполнение прервано. Откатываем изменения..."
+
+    # Удаляем временный ZIP-файл
+    if [[ -f "/tmp/Xray-linux-64.zip" ]]; then
+        echo "[*] Удаляем /tmp/Xray-linux-64.zip"
+        rm -f /tmp/Xray-linux-64.zip
+    fi
+
+    # Удаляем бинарник xray, если есть
+    if [[ -f "/var/lib/remnanode/xray" ]]; then
+        echo "[*] Удаляем /var/lib/remnanode/xray"
+        rm -f /var/lib/remnanode/xray
+    fi
+
+    # Удаляем пустую папку /var/lib/remnanode, если она пуста
+    if [[ -d "/var/lib/remnanode" ]] && [[ -z "$(ls -A /var/lib/remnanode 2>/dev/null)" ]]; then
+        echo "[*] Удаляем пустую папку /var/lib/remnanode"
+        rmdir /var/lib/remnanode
+    fi
+
+    # Откатываем добавленную секцию volume в docker-compose.yml
+    if [[ -f "/opt/remnanode/docker-compose.yml" ]]; then
+        COMPOSE_FILE="/opt/remnanode/docker-compose.yml"
+        MOUNT_LINE="      - /var/lib/remnanode/xray:/usr/local/bin/xray:ro"
+        if grep -q "$MOUNT_LINE" "$COMPOSE_FILE"; then
+            echo "[*] Удаляем монтирование xray из $COMPOSE_FILE"
+            sed -i "\|$MOUNT_LINE|d" "$COMPOSE_FILE"
+        fi
+    fi
+
+    # Перезапускаем контейнер remnanode (если он существовал)
+    if [[ -f "/opt/remnanode/docker-compose.yml" ]]; then
+        cd /opt/remnanode
+        echo "[*] Перезапускаем remnanode без кастомного xray..."
+        $DOCKER_COMPOSE up -d || true
+        cd /
+    fi
+
+    echo "[✓] Очистка завершена."
+    exit 1
+}
+trap cleanup_custom INT TERM
 
 # Проверка Docker
 if ! command -v docker &> /dev/null; then
@@ -121,7 +168,7 @@ $MOUNT_LINE
     fi
 
     # Проверяем синтаксис compose-файла
-    if ! $DOCKER_COMPOSE config &> /dev/null; then
+    if ! $DOCKER_COMPOSE config; then
         echo "[×] Ошибка в docker-compose.yml после добавления volume. Восстанавливаем бэкап..."
         mv "$COMPOSE_FILE.bak" "$COMPOSE_FILE"
         exit 1
@@ -140,6 +187,9 @@ sleep 8
 # Вывод логов
 echo "[*] Последние 50 строк логов:"
 $DOCKER_COMPOSE logs --tail=50
+
+# --- Снимаем trap после успешного выполнения ---
+trap - INT TERM
 
 echo ""
 echo "[✓] Готово, Xray-core ${KERNEL_VERSION} установлен."

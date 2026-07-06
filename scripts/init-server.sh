@@ -1,4 +1,5 @@
 #!/bin/bash
+set -o pipefail
 set -e
 
 echo "=== Базовая подготовка сервера (переустановка Docker и Compose) ==="
@@ -8,12 +9,14 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+trap 'echo "[!] Прервано. Попытка отката..."; exit 1' INT TERM
+
 # --- Функция для безопасного выполнения команды с выводом статуса ---
 safe_run() {
   local cmd="$1"
   local desc="$2"
   echo -n "[*] $desc... "
-  if eval "$cmd" &>/dev/null; then
+  if eval "$cmd"; then
     echo "[✓]"
   else
     echo "[!] Не удалось выполнить (пропускаем)"
@@ -31,16 +34,16 @@ fi
 
 # --- 1. Остановка всех служб Docker ---
 echo "[*] Останавливаем все службы Docker..."
-systemctl stop docker.service 2>/dev/null || true
-systemctl stop docker.socket 2>/dev/null || true
-systemctl stop containerd 2>/dev/null || true
+systemctl stop docker.service || true
+systemctl stop docker.socket || true
+systemctl stop containerd || true
 
 # --- 2. Удаление всех пакетов Docker и Compose (включая плагины) ---
 echo "[*] Удаляем существующие пакеты Docker и Compose..."
 PKGS="docker.io docker-ce docker-engine docker-ce-cli containerd.io docker-ce-rootless-extras docker-buildx-plugin docker-compose-plugin"
 for pkg in $PKGS; do
   # Безопасная проверка для режима set -e (добавлен || false)
-  if dpkg -l "$pkg" 2>/dev/null | grep -q "^ii " || false; then
+  if dpkg -l "$pkg" | grep -q "^ii " || false; then
     echo "  - Полностью вычищаем (purge) $pkg..."
     apt-get purge -y "$pkg"
   fi
@@ -60,13 +63,13 @@ if [ -f /etc/docker/daemon.json ]; then
   mv /etc/docker/daemon.json /etc/docker/daemon.json.bak
   echo "  - Старый daemon.json сохранен как daemon.json.bak"
 fi
-rm -rf /etc/docker/*.key /etc/docker/*.crt 2>/dev/null || true
+rm -rf /etc/docker/*.key /etc/docker/*.crt || true
 
 # Удаляем сетевой интерфейс docker0, если он висит
-if ip link show docker0 &>/dev/null; then
+if ip link show docker0; then
     echo "  - Сбрасываем старый сетевой мост docker0..."
-    ip link set dev docker0 down 2>/dev/null || true
-    ip link delete docker0 2>/dev/null || true
+    ip link set dev docker0 down || true
+    ip link delete docker0 || true
 fi
 
 echo "[✓] Система очищена от старого Docker, но данные (volumes) сохранены."
@@ -80,7 +83,7 @@ safe_run "apt-get clean" "Очистка кэша apt"
 
 # --- 6. Установка Docker через официальный скрипт ---
 echo "[*] Устанавливаем Docker через официальный скрипт..."
-if curl -fsSL https://get.docker.com | sh; then
+if curl -fL https://get.docker.com | sh; then
   echo "[✓] Docker установлен успешно."
 else
   echo "[×] Ошибка установки Docker. Прерываем выполнение."
@@ -94,7 +97,7 @@ systemctl enable docker || true
 
 # --- 8. Проверка работоспособности Docker ---
 echo "[*] Проверяем работу Docker (запуск hello-world)..."
-if docker run --rm hello-world >/dev/null 2>&1; then
+if docker run --rm hello-world; then
   echo "[✓] Docker работает корректно."
 else
   echo "[×] Docker не может запускать контейнеры. Проверьте настройки."
@@ -103,9 +106,9 @@ fi
 
 # --- 9. Проверка и установка docker-compose (если отсутствует) ---
 echo "[*] Проверяем наличие docker compose..."
-if docker compose version &>/dev/null; then
+if docker compose version; then
   echo "[✓] docker compose (современный плагин V2) уже установлен скриптом Docker."
-elif command -v docker-compose &>/dev/null; then
+elif command -v docker-compose; then
   echo "[✓] Найдена старая версия docker-compose (бинарник)."
 else
   echo "[!] Предупреждение: Скрипт Docker не установил плагин Compose автоматически."
@@ -113,7 +116,7 @@ else
   OS=$(uname -s | tr '[:upper:]' '[:lower:]')
   ARCH=$(uname -m)
   URL="https://github.com/docker/compose/releases/latest/download/docker-compose-${OS}-${ARCH}"
-  if curl -L "$URL" -o /usr/local/bin/docker-compose 2>/dev/null; then
+  if curl -L "$URL" -o /usr/local/bin/docker-compose; then
     chmod +x /usr/local/bin/docker-compose
     echo "[✓] docker-compose успешно установлен вручную в /usr/local/bin/."
   else
@@ -127,11 +130,14 @@ echo ""
 echo "=== ФИНАЛЬНЫЙ СТАТУС СИСТЕМЫ ==="
 docker --version
 
-if docker compose version &>/dev/null; then
+if docker compose version; then
   echo -n "Docker Compose: " && docker compose version
-elif command -v docker-compose &>/dev/null; then
+elif command -v docker-compose; then
   echo -n "Docker Compose (Legacy): " && docker-compose --version
 fi
+
+# --- Снимаем trap после успешного выполнения ---
+trap - INT TERM
 
 echo ""
 echo "[✓] Базовая подготовка сервера завершена."

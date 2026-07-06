@@ -1,4 +1,5 @@
 #!/bin/bash
+set -o pipefail
 set -e
 
 if [ "$EUID" -ne 0 ]; then
@@ -21,6 +22,23 @@ else
     echo "[!] docker compose (или docker-compose) не установлен. Установите отдельно."
     exit 1
 fi
+
+# --- Функция очистки при прерывании ---
+cleanup() {
+    echo ""
+    echo "[!] Получен сигнал прерывания. Выполняем очистку..."
+    # Останавливаем и удаляем контейнеры, если они запущены
+    if [[ -f "/opt/remnanode/caddy/docker-compose.yml" ]]; then
+        cd /opt/remnanode/caddy
+        $DOCKER_COMPOSE down || true
+        cd /
+    fi
+    # Удаляем созданные папки
+    rm -rf /opt/remnanode/caddy /opt/remnanode/filecloud
+    echo "[✓] Очистка выполнена."
+    exit 1
+}
+trap cleanup INT TERM
 
 # --- Установка зависимостей (wget, unzip, curl) ---
 apt-get update
@@ -76,7 +94,7 @@ if [[ -d "/opt/remnanode/caddy" || -d "/opt/remnanode/filecloud" ]]; then
     echo "[!] Обнаружены существующие директории. Останавливаем и удаляем старые контейнеры..."
     if [[ -f "/opt/remnanode/caddy/docker-compose.yml" ]]; then
         cd /opt/remnanode/caddy
-        $DOCKER_COMPOSE down 2>/dev/null || true
+        $DOCKER_COMPOSE down || true
         cd /
     fi
     echo "[*] Удаляем старые папки..."
@@ -103,7 +121,7 @@ rm -rf main.zip server-preparation-main
 
 # --- Хеш пароля ---
 echo "[*] Генерируем хеш пароля для базовой аутентификации..."
-HASHED_PASSWORD=$(docker run --rm caddy:latest caddy hash-password --plaintext "$WEB_PASSWORD" 2>/dev/null | tail -1)
+HASHED_PASSWORD=$(docker run --rm caddy:latest caddy hash-password --plaintext "$WEB_PASSWORD" | tail -1)
 
 # --- Создаём .env файл с секретами ---
 cat > /opt/remnanode/caddy/.env <<EOF
@@ -191,7 +209,7 @@ show_logs_and_wait() {
     done
 }
 
-trap 'echo ""; echo "[!] Ожидание прервано пользователем."; kill $LOG_PID 2>/dev/null || true; exit 0' INT
+trap 'echo ""; echo "[!] Ожидание прервано пользователем."; kill $LOG_PID 2>/dev/null || true; cleanup; exit 1' INT
 
 show_logs_and_wait
 
@@ -215,7 +233,7 @@ mkdir -p /etc/ssl/certs /etc/ssl/private
 
 # Проверяем валидность сертификата (не истёк и существует)
 if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ]; then
-    if openssl x509 -in "$CERT_FILE" -noout -checkend 86400 >/dev/null 2>&1; then
+    if openssl x509 -in "$CERT_FILE" -noout -checkend 86400; then
         ln -sf "$CERT_FILE" /etc/ssl/certs/noctua.crt
         ln -sf "$KEY_FILE" /etc/ssl/private/noctua.key
         chmod 644 /etc/ssl/certs/noctua.crt
@@ -275,7 +293,7 @@ $MOUNT_KEY
         fi
 
         # Проверяем синтаксис compose-файла
-        if ! $DOCKER_COMPOSE -f "$REMNA_NODE_COMPOSE" config &> /dev/null; then
+        if ! $DOCKER_COMPOSE -f "$REMNA_NODE_COMPOSE" config; then
             echo "[×] Ошибка в $REMNA_NODE_COMPOSE после добавления монтирования. Восстанавливаем бэкап..."
             mv "$REMNA_NODE_COMPOSE.bak" "$REMNA_NODE_COMPOSE"
             exit 1
@@ -293,6 +311,9 @@ else
     echo "[!] /opt/remnanode/docker-compose.yml не найден. Монтирование сертификатов в remnanode пропущено."
 fi
 
+# --- Снимаем trap после успешного выполнения ---
+trap - INT TERM
+
 echo ""
 echo "[✓] Готово"
 echo "================================================================================"
@@ -302,4 +323,5 @@ echo "[*] Пароль: ${WEB_PASSWORD} (сохранён в /opt/remnanode/cadd
 echo "[*] Сертификаты: ${CERT_DIR}"
 echo "[*] Ссылки: /etc/ssl/certs/noctua.crt  и  /etc/ssl/private/noctua.key"
 echo "================================================================================"
+
 exit 0

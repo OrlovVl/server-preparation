@@ -1,4 +1,5 @@
 #!/bin/bash
+set -o pipefail
 set -e
 
 echo "=== Настройка сервера (TCP-оптимизация) ==="
@@ -85,7 +86,7 @@ create_backups() {
   # --- Сохраняем состояние swap ---
   local swap_info="${dest}/swap_info.txt"
   if [ -f /swapfile ]; then
-    local size_bytes=$(stat -c%s /swapfile 2>/dev/null || echo 0)
+    local size_bytes=$(stat -c%s /swapfile || echo 0)
     local size_mb=$((size_bytes / 1024 / 1024))
     echo "exists=yes" > "$swap_info"
     echo "size_mb=$size_mb" >> "$swap_info"
@@ -102,7 +103,7 @@ create_backups() {
   fi
 
   # Сохраняем переданные порты
-  echo "$TCP_PORTS" > "${dest}/tcp_ports.txt" 2>/dev/null || true
+  echo "$TCP_PORTS" > "${dest}/tcp_ports.txt" || true
 }
 
 # --- Функция встроенного отката (если rollback-скрипт недоступен) ---
@@ -129,7 +130,7 @@ rollback_profile() {
     source <(grep -E '^(exists|size_mb)=' "${backup_dir}/swap_info.txt")
     # Удаляем текущий swap, если он есть
     if [ -f /swapfile ]; then
-      swapoff /swapfile 2>/dev/null || true
+      swapoff /swapfile || true
       rm -f /swapfile
       # Удаляем запись из fstab, если она была добавлена нами (строка с /swapfile)
       sed -i '/\/swapfile/d' /etc/fstab
@@ -199,6 +200,8 @@ done
 # --- Переключение на профиль tcp ---
 switch_profile "tcp"
 
+trap 'echo ""; echo "[!] Прервано. Выполняем откат..."; rollback_profile "tcp"; exit 1' INT TERM
+
 # --- Установка пакетов ---
 apt-get update
 for pkg in ufw curl wget; do
@@ -214,7 +217,7 @@ TARGET_SWAP_MB=$((TARGET_SWAP_GB * 1024))
 SWAP_FILE="/swapfile"
 CREATE_SWAP=true
 if [ -f "$SWAP_FILE" ]; then
-  CURRENT_SWAP_BYTES=$(stat -c%s "$SWAP_FILE" 2>/dev/null || echo 0)
+  CURRENT_SWAP_BYTES=$(stat -c%s "$SWAP_FILE" || echo 0)
   CURRENT_SWAP_MB=$((CURRENT_SWAP_BYTES / 1024 / 1024))
   DIFF_MB=$((CURRENT_SWAP_MB - TARGET_SWAP_MB))
   ABS_DIFF_MB=${DIFF_MB#-}
@@ -222,7 +225,7 @@ if [ -f "$SWAP_FILE" ]; then
     echo "[✓] SWAP уже правильного размера."
     CREATE_SWAP=false
   else
-    swapoff "$SWAP_FILE" 2>/dev/null || true
+    swapoff "$SWAP_FILE" || true
     rm -f "$SWAP_FILE"
   fi
 fi
@@ -280,8 +283,8 @@ $SYSCTL_MARKER_END
 EOF
 
 # --- Модуль BBR ---
-modprobe tcp_bbr 2>/dev/null || true
-if ! grep -q "^tcp_bbr" /etc/modules-load.d/modules.conf 2>/dev/null; then
+modprobe tcp_bbr || true
+if ! grep -q "^tcp_bbr" /etc/modules-load.d/modules.conf; then
   echo "tcp_bbr" >> /etc/modules-load.d/modules.conf
 fi
 
@@ -348,18 +351,18 @@ fi
 echo -e "\n=== Настройка завершена ===\n"
 set +e
 echo "--- Проверка BBR ---"
-BBR_SYSCTL=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}')
+BBR_SYSCTL=$(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')
 [ "$BBR_SYSCTL" = "bbr" ] && echo "[✓] BBR активен." || echo "[×] BBR не активирован."
 
 echo "--- Проверка ICMP ---"
-if grep -q "icmp --icmp-type echo-request -j DROP" /etc/ufw/before.rules 2>/dev/null; then
+if grep -q "icmp --icmp-type echo-request -j DROP" /etc/ufw/before.rules; then
   echo "[✓] ICMP отключён в UFW."
 else
   echo "[×] ICMP не отключён в UFW."
 fi
 
 echo "--- Проверка IPv6 ---"
-[ "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null)" = "1" ] && echo "[✓] IPv6 отключён." || echo "[×] IPv6 не отключён (требуется перезагрузка)."
+[ "$(sysctl -n net.ipv6.conf.all.disable_ipv6)" = "1" ] && echo "[✓] IPv6 отключён." || echo "[×] IPv6 не отключён (требуется перезагрузка)."
 
 echo -e "\n--- SWAP ---"
 free -h | grep -E "Mem|Swap"
@@ -371,6 +374,9 @@ fi
 
 echo -e "\n--- Слушаемые порты ---"
 ss -tuln
+
+# --- Снимаем trap после успешного выполнения ---
+trap - INT TERM
 
 echo -e "\n[✓] Настройки оптимизированы для TCP-ориентированного трафика."
 echo "[*] Бэкапы сохранены в $BACKUP_DIR"

@@ -1,10 +1,13 @@
 #!/bin/bash
+set -o pipefail
 set -e
 
 if [ "$EUID" -ne 0 ]; then
     echo "[×] Запускайте от root."
     exit 1
 fi
+
+trap 'echo ""; echo "[!] Прервано. Откат может быть неполным."; exit 1' INT TERM
 
 # Проверка Docker
 if ! command -v docker &> /dev/null; then
@@ -104,7 +107,7 @@ END {
 ' "$COMPOSE_FILE" > "$COMPOSE_FILE.tmp" && mv "$COMPOSE_FILE.tmp" "$COMPOSE_FILE"
 
 # Проверка синтаксиса
-if ! $DOCKER_COMPOSE config &> /dev/null; then
+if ! $DOCKER_COMPOSE config; then
     echo "[×] Ошибка в docker-compose.yml после изменений. Восстанавливаем бэкап..."
     mv "$COMPOSE_FILE.bak" "$COMPOSE_FILE"
     exit 1

@@ -1,10 +1,13 @@
 #!/bin/bash
+set -o pipefail
 set -e
 
 if [ "$EUID" -ne 0 ]; then
     echo "[×] Запускайте от root."
     exit 1
 fi
+
+trap 'echo ""; echo "[!] Прервано. Откат может быть неполным."; exit 1' INT TERM
 
 # --- Проверка Docker ---
 if ! command -v docker &> /dev/null; then
@@ -106,7 +109,7 @@ if [[ -f "$REMNA_NODE_COMPOSE" ]]; then
         ' "$REMNA_NODE_COMPOSE" > "$REMNA_NODE_COMPOSE.tmp" && mv "$REMNA_NODE_COMPOSE.tmp" "$REMNA_NODE_COMPOSE"
 
         # Проверка синтаксиса
-        if ! $DOCKER_COMPOSE -f "$REMNA_NODE_COMPOSE" config &> /dev/null; then
+        if ! $DOCKER_COMPOSE -f "$REMNA_NODE_COMPOSE" config; then
             echo "[×] Ошибка в $REMNA_NODE_COMPOSE после изменений. Восстанавливаем бэкап..."
             mv "$REMNA_NODE_COMPOSE.bak" "$REMNA_NODE_COMPOSE"
             exit 1

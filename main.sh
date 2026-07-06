@@ -1,5 +1,4 @@
 #!/bin/bash
-
 set -o pipefail
 set -e
 
@@ -8,6 +7,8 @@ if [ "$EUID" -ne 0 ]; then
     echo "[×] Запускайте от root."
     exit 1
 fi
+
+trap 'echo ""; echo "[!] Прервано. Выход."; exit 1' INT TERM
 
 # --- Базовые URL ---
 REPO_BASE="https://raw.githubusercontent.com/OrlovVl/server-preparation/refs/heads/main"

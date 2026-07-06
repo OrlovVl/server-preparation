@@ -1,4 +1,5 @@
 #!/bin/bash
+set -o pipefail
 set -e
 
 # --- Проверка прав root ---
@@ -6,6 +7,8 @@ if [ "$EUID" -ne 0 ]; then
     echo "[×] Запускайте от root."
     exit 1
 fi
+
+trap 'echo ""; echo "[!] Прервано. Откат может быть неполным."; exit 1' INT TERM
 
 # --- Проверка Docker ---
 if ! command -v docker &> /dev/null; then
@@ -40,8 +43,8 @@ else
     # Если compose-файла нет, но контейнер остался – удаляем вручную
     if docker ps -a --format '{{.Names}}' | grep -q "^remnanode$"; then
         echo "[*] docker-compose.yml не найден, удаляем контейнер вручную..."
-        docker stop remnanode &>/dev/null || true
-        docker rm remnanode &>/dev/null || true
+        docker stop remnanode || true
+        docker rm remnanode || true
         echo "[✓] Контейнер удалён."
     else
         echo "[*] Контейнер remnanode не найден."

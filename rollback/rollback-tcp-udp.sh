@@ -1,10 +1,13 @@
 #!/bin/bash
+set -o pipefail
 set -e
 
 if [ "$EUID" -ne 0 ]; then
   echo "[×] Запускайте от root."
   exit 1
 fi
+
+trap 'echo ""; echo "[!] Прервано. Откат может быть неполным."; exit 1' INT TERM
 
 BACKUP_BASE="/opt/remnanode/backups"
 BACKUP_DIR="${BACKUP_BASE}/tcp-udp"
@@ -29,7 +32,7 @@ done
 if [ -f "${BACKUP_DIR}/swap_info.txt" ]; then
   source <(grep -E '^(exists|size_mb)=' "${BACKUP_DIR}/swap_info.txt")
   if [ -f /swapfile ]; then
-    swapoff /swapfile 2>/dev/null || true
+    swapoff /swapfile || true
     rm -f /swapfile
     sed -i '/\/swapfile/d' /etc/fstab
   fi
