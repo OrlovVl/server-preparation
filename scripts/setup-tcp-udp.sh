@@ -291,6 +291,9 @@ net.ipv4.tcp_syncookies = 1
 net.ipv4.tcp_max_syn_backlog = 2048
 
 vm.swappiness = 10
+
+# TCP Fast Open
+net.ipv4.tcp_fastopen = 3
 $SYSCTL_MARKER_END
 EOF
 
