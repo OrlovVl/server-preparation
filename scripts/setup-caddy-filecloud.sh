@@ -42,7 +42,7 @@ trap cleanup INT TERM
 
 # --- Установка пакетов ---
 apt-get update
-for pkg in wget unzip curl apache2-utils; do
+for pkg in wget unzip curl apache2-utils openssl; do
     if ! command -v "$pkg" &> /dev/null; then
         echo "[*] Устанавливаем $pkg..."
         apt-get install -y "$pkg"
@@ -106,7 +106,7 @@ mkdir -p /opt/remnanode/filecloud
 
 # --- Генерация пароля ---
 if [[ -z "$WEB_PASSWORD" ]]; then
-    WEB_PASSWORD=$(tr -dc 'A-Za-z0-9!@#$%^&*()_+-=' < /dev/urandom | head -c 32)
+    WEB_PASSWORD=$(openssl rand -base64 32 | tr -d '\n=' | cut -c1-32)
 fi
 WEB_USER="admin"
 echo "[*] Пароль для пользователя $WEB_USER: $WEB_PASSWORD"
