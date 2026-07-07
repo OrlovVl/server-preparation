@@ -51,8 +51,7 @@ done
 
 # --- Парсинг аргументов ---
 DOMAIN=""
-PORKBUN_API_KEY=""
-PORKBUN_SECRET=""
+PORKBUN_KEYS=""
 WEB_PASSWORD=""
 
 while [[ $# -gt 0 ]]; do
@@ -61,12 +60,8 @@ while [[ $# -gt 0 ]]; do
             DOMAIN="$2"
             shift 2
             ;;
-        --porkbun-api-key)
-            PORKBUN_API_KEY="$2"
-            shift 2
-            ;;
-        --porkbun-secret)
-            PORKBUN_SECRET="$2"
+        --porkbun-keys)
+            PORKBUN_KEYS="$2"
             shift 2
             ;;
         --web-password)
@@ -74,20 +69,38 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help|-h)
-            echo "Использование: $0 --domain example.com --porkbun-api-key 'key' --porkbun-secret 'secret' [--web-password 'pass']"
+            echo "Использование: $0 --domain example.com --porkbun-keys 'pk1_... sk1_...' [--web-password 'pass']"
             exit 0
             ;;
         *)
             echo "[×] Неизвестный параметр: $1"
+            echo "Используйте --help для справки."
             exit 1
             ;;
     esac
 done
 
-if [[ -z "$DOMAIN" || -z "$PORKBUN_API_KEY" || -z "$PORKBUN_SECRET" ]]; then
-    echo "[×] Использование: $0 --domain example.com --porkbun-api-key 'key' --porkbun-secret 'secret' [--web-password 'pass']"
+# --- Проверка обязательных параметров ---
+if [[ -z "$DOMAIN" ]]; then
+    echo "[×] Не указан домен. Используйте --domain example.com"
     exit 1
 fi
+
+if [[ -z "$PORKBUN_KEYS" ]]; then
+    echo "[×] Не указаны ключи Porkbun. Используйте --porkbun-keys 'pk1_... sk1_...'"
+    exit 1
+fi
+
+# Разбиваем строку ключей на два отдельных значения
+read -r PORKBUN_API_KEY PORKBUN_SECRET <<< "$PORKBUN_KEYS"
+if [[ -z "$PORKBUN_API_KEY" || -z "$PORKBUN_SECRET" ]]; then
+    echo "[×] Ошибка: нужно передать два ключа (API Key и Secret Key) через пробел."
+    echo "Пример: --porkbun-keys 'pk1_... sk1_...'"
+    exit 1
+fi
+
+echo "[✓] Домен: $DOMAIN"
+echo "[✓] Ключи приняты."
 
 # --- Остановка и удаление старых контейнеров ---
 if [[ -d "/opt/remnanode/caddy" || -d "/opt/remnanode/filecloud" ]]; then

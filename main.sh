@@ -66,10 +66,10 @@ ask_udp_ports() {
 }
 
 ask_caddy_params() {
+    local domain api_keys
     read -p "Введите домен (например, example.com): " domain
-    read -p "Введите Porkbun API Key: " api_key
-    read -p "Введите Porkbun Secret Key: " secret
-    echo "--domain $domain --porkbun-api-key $api_key --porkbun-secret $secret"
+    read -p "Введите Porkbun ключи (API Key и Secret Key через пробел): " api_keys
+    echo "--domain $domain --porkbun-keys \"$api_keys\""
 }
 
 # --- Комплексная настройка (пункт 1) ---
