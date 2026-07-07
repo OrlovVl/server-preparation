@@ -13,7 +13,7 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# --- Определение команды docker compose (предпочтение без дефиса) ---
+# --- Определение команды docker compose ---
 if docker compose version &> /dev/null; then
     DOCKER_COMPOSE="docker compose"
 elif command -v docker-compose &> /dev/null; then
@@ -40,7 +40,7 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-# --- Установка пакетов ---
+# --- Установка зависимостей ---
 apt-get update
 for pkg in wget unzip curl apache2-utils openssl; do
     if ! command -v "$pkg" &> /dev/null; then
@@ -102,19 +102,152 @@ fi
 echo "[✓] Домен: $DOMAIN"
 echo "[✓] Ключи приняты."
 
+# ---- Вспомогательные функции ----
+
+# Функция создания/обновления симлинков на сертификаты
+setup_symlinks() {
+    local cert_file="$1"
+    local key_file="$2"
+    echo "[*] Проверяем симлинки..."
+    if [[ -L "/etc/ssl/certs/noctua.crt" && -L "/etc/ssl/private/noctua.key" ]]; then
+        if [[ "$(readlink -f /etc/ssl/certs/noctua.crt)" == "$cert_file" && \
+              "$(readlink -f /etc/ssl/private/noctua.key)" == "$key_file" ]]; then
+            echo "[✓] Симлинки уже указывают на актуальные сертификаты."
+            return 0
+        else
+            echo "[*] Симлинки существуют, но указывают на другие файлы. Обновляем..."
+        fi
+    else
+        echo "[*] Симлинки отсутствуют. Создаём..."
+    fi
+    mkdir -p /etc/ssl/certs /etc/ssl/private
+    ln -sf "$cert_file" /etc/ssl/certs/noctua.crt
+    ln -sf "$key_file" /etc/ssl/private/noctua.key
+    chmod 644 /etc/ssl/certs/noctua.crt
+    chmod 600 /etc/ssl/private/noctua.key
+    echo "[✓] Симлинки обновлены."
+}
+
+# Функция добавления монтирования сертификатов в docker-compose.yml remnanode
+add_mount_to_remnanode() {
+    local compose_file="/opt/remnanode/docker-compose.yml"
+    if [[ ! -f "$compose_file" ]]; then
+        echo "[!] $compose_file не найден. Монтирование пропущено."
+        return 1
+    fi
+    echo "[*] Проверяем монтирование сертификатов в remnanode..."
+    local mount_cert="      - /etc/ssl/certs/noctua.crt:/etc/ssl/certs/noctua.crt:ro"
+    local mount_key="      - /etc/ssl/private/noctua.key:/etc/ssl/private/noctua.key:ro"
+
+    if grep -q "$mount_cert" "$compose_file" && grep -q "$mount_key" "$compose_file"; then
+        echo "[✓] Монтирование сертификатов уже присутствует в remnanode."
+        return 0
+    fi
+
+    echo "[*] Добавляем монтирование в $compose_file..."
+    cp "$compose_file" "$compose_file.bak"
+
+    # Используем awk для вставки в конец блока remnanode
+    awk -v mount_cert="$mount_cert" -v mount_key="$mount_key" '
+    BEGIN { in_service=0; printed_volumes=0; }
+    {
+        if ($0 ~ /^  remnanode:/) {
+            in_service=1
+            print $0
+            next
+        }
+        if (in_service) {
+            if ($0 ~ /^  / && $0 !~ /^    /) {
+                if (!printed_volumes) {
+                    print "    volumes:"
+                    print mount_cert
+                    print mount_key
+                    printed_volumes=1
+                }
+                print $0
+                in_service=0
+                next
+            }
+            print $0
+            next
+        }
+        print $0
+    }
+    END {
+        if (in_service && !printed_volumes) {
+            print "    volumes:"
+            print mount_cert
+            print mount_key
+        }
+    }
+    ' "$compose_file" > "$compose_file.tmp" && mv "$compose_file.tmp" "$compose_file"
+
+    if ! $DOCKER_COMPOSE -f "$compose_file" config; then
+        echo "[×] Ошибка в $compose_file после добавления монтирования. Восстанавливаем бэкап..."
+        mv "$compose_file.bak" "$compose_file"
+        return 1
+    fi
+    rm -f "$compose_file.bak"
+    echo "[✓] Монтирование сертификатов добавлено в remnanode."
+
+    echo "[*] Перезапускаем remnanode для применения монтирования..."
+    $DOCKER_COMPOSE -f "$compose_file" down
+    $DOCKER_COMPOSE -f "$compose_file" up -d
+    return 0
+}
+
+# --- Проверка наличия сертификатов ---
+CADDY_DIR="/opt/remnanode/caddy"
+CERT_BASE="$CADDY_DIR/data/caddy/certificates"
+CERT_DIR=""
+CERT_FILE=""
+KEY_FILE=""
+CERT_EXISTS=false
+
+if [[ -d "$CERT_BASE" ]]; then
+    CERT_DIR=$(find "$CERT_BASE" -type d -name "*${DOMAIN}*" 2>/dev/null | head -1)
+    if [[ -n "$CERT_DIR" ]]; then
+        CERT_FILE="${CERT_DIR}/${DOMAIN}.crt"
+        KEY_FILE="${CERT_DIR}/${DOMAIN}.key"
+        if [[ -f "$CERT_FILE" && -f "$KEY_FILE" ]]; then
+            CERT_EXISTS=true
+            echo "[✓] Сертификаты уже существуют: $CERT_DIR"
+        fi
+    fi
+fi
+
+# --- Если сертификаты уже есть, только проверяем симлинки и монтирование ---
+if [[ "$CERT_EXISTS" == true ]]; then
+    echo "[*] Сертификаты найдены. Проверяем симлинки и монтирование..."
+    setup_symlinks "$CERT_FILE" "$KEY_FILE"
+    add_mount_to_remnanode
+
+    echo ""
+    echo "[✓] Всё уже настроено. Завершаем."
+    echo "================================================================================"
+    echo "[*] Заглушка: https://${DOMAIN} (через fallback Xray)"
+    echo "[*] Сертификаты: ${CERT_DIR}"
+    echo "[*] Ссылки: /etc/ssl/certs/noctua.crt  и  /etc/ssl/private/noctua.key"
+    echo "================================================================================"
+    exit 0
+fi
+
+# --- Если сертификатов нет, выполняем полную установку ---
+echo "[!] Сертификаты не найдены. Выполняем полную настройку..."
+
 # --- Остановка и удаление старых контейнеров ---
-if [[ -d "/opt/remnanode/caddy" || -d "/opt/remnanode/filecloud" ]]; then
+if [[ -d "$CADDY_DIR" || -d "/opt/remnanode/filecloud" ]]; then
     echo "[!] Обнаружены существующие директории. Останавливаем и удаляем старые контейнеры..."
-    if [[ -f "/opt/remnanode/caddy/docker-compose.yml" ]]; then
-        cd /opt/remnanode/caddy
+    if [[ -f "$CADDY_DIR/docker-compose.yml" ]]; then
+        cd "$CADDY_DIR"
         $DOCKER_COMPOSE down || true
         cd /
     fi
     echo "[*] Удаляем старые папки..."
-    rm -rf /opt/remnanode/caddy /opt/remnanode/filecloud
+    rm -rf "$CADDY_DIR" /opt/remnanode/filecloud
 fi
 
-mkdir -p /opt/remnanode/caddy/{data,config}
+mkdir -p "$CADDY_DIR"/{data,config}
 mkdir -p /opt/remnanode/filecloud
 
 # --- Генерация пароля ---
@@ -137,13 +270,13 @@ echo "[*] Генерируем хеш пароля для базовой аут�
 HASHED_PASSWORD=$(htpasswd -nbB "$WEB_USER" "$WEB_PASSWORD" | cut -d: -f2)
 
 # --- Создаём .env файл с секретами ---
-cat > /opt/remnanode/caddy/.env <<EOF
+cat > "$CADDY_DIR"/.env <<EOF
 PORKBUN_API_KEY=${PORKBUN_API_KEY}
 PORKBUN_SECRET=${PORKBUN_SECRET}
 EOF
 
 # --- Caddyfile ---
-cat > /opt/remnanode/caddy/Caddyfile <<EOF
+cat > "$CADDY_DIR"/Caddyfile <<EOF
 ${DOMAIN} {
     tls {
         dns porkbun {
@@ -158,8 +291,8 @@ ${DOMAIN} {
 }
 EOF
 
-# --- docker-compose.yml ---
-cat > /opt/remnanode/caddy/docker-compose.yml <<EOF
+# --- docker-compose.yml для Caddy и FileCloud ---
+cat > "$CADDY_DIR"/docker-compose.yml <<EOF
 services:
   caddy:
     image: srstone/caddy-porkbun:latest
@@ -185,16 +318,16 @@ services:
       - /opt/remnanode/filecloud:/app
 EOF
 
-rm -f /opt/remnanode/caddy/.password
-echo "$WEB_PASSWORD" > /opt/remnanode/caddy/.password
-chmod 600 /opt/remnanode/caddy/.password
+rm -f "$CADDY_DIR"/.password
+echo "$WEB_PASSWORD" > "$CADDY_DIR"/.password
+chmod 600 "$CADDY_DIR"/.password
 
 # --- Запуск контейнеров ---
-cd /opt/remnanode/caddy
+cd "$CADDY_DIR"
 echo "[*] Запускаем контейнеры..."
 $DOCKER_COMPOSE up -d
 
-# --- Ожидание сертификатов с показом логов ---
+# --- Ожидание сертификатов ---
 echo "[*] Ожидаем получения сертификатов. Логи Caddy будут выводиться в реальном времени."
 echo "[*] Нажмите Ctrl+C, чтобы прервать ожидание (контейнеры продолжат работу)."
 echo ""
@@ -204,7 +337,6 @@ show_logs_and_wait() {
     LOG_PID=$!
 
     while true; do
-        CERT_BASE="/opt/remnanode/caddy/data/caddy/certificates"
         if [[ -d "$CERT_BASE" ]]; then
             CERT_DIR=$(find "$CERT_BASE" -type d -name "*${DOMAIN}*" 2>/dev/null | head -1)
             if [[ -n "$CERT_DIR" ]]; then
@@ -226,9 +358,7 @@ trap 'echo ""; echo "[!] Ожидание прервано пользовате�
 
 show_logs_and_wait
 
-# --- После получения сертификатов создаём симлинки ---
-CERT_BASE="/opt/remnanode/caddy/data/caddy/certificates"
-CERT_DIR=$(find "$CERT_BASE" -type d -name "*${DOMAIN}*" | head -1)
+# --- После получения сертификатов создаём симлинки и монтируем ---
 if [[ -z "$CERT_DIR" ]]; then
     echo "[!] Не удалось найти папку с сертификатами. Симлинки не созданы."
     exit 1
@@ -236,103 +366,40 @@ fi
 
 CERT_FILE="${CERT_DIR}/${DOMAIN}.crt"
 KEY_FILE="${CERT_DIR}/${DOMAIN}.key"
-
 if [[ ! -f "$CERT_FILE" || ! -f "$KEY_FILE" ]]; then
     echo "[!] Файлы сертификатов не найдены в $CERT_DIR"
     exit 1
 fi
 
-mkdir -p /etc/ssl/certs /etc/ssl/private
-
-# Проверяем валидность сертификата (не истёк и существует)
-if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ]; then
-    if openssl x509 -in "$CERT_FILE" -noout -checkend 86400; then
-        ln -sf "$CERT_FILE" /etc/ssl/certs/noctua.crt
-        ln -sf "$KEY_FILE" /etc/ssl/private/noctua.key
-        chmod 644 /etc/ssl/certs/noctua.crt
-        chmod 600 /etc/ssl/private/noctua.key
-        echo "[✓] Симлинки созданы и указывают на актуальные сертификаты."
-    else
-        echo "[!] Сертификат истёк или невалиден. Симлинки не созданы."
-        exit 1
-    fi
+# Проверка валидности и создание симлинков
+if openssl x509 -in "$CERT_FILE" -noout -checkend 86400 >/dev/null 2>&1; then
+    setup_symlinks "$CERT_FILE" "$KEY_FILE"
 else
-    echo "[!] Файлы сертификатов не найдены. Симлинки не созданы."
+    echo "[!] Сертификат истёк или невалиден. Симлинки не созданы."
     exit 1
 fi
 
-# --- Монтирование сертификатов в контейнер remnanode (если существует) ---
-REMNA_NODE_COMPOSE="/opt/remnanode/docker-compose.yml"
-if [[ -f "$REMNA_NODE_COMPOSE" ]]; then
-    echo "[*] Обнаружен docker-compose.yml для remnanode. Добавляем монтирование сертификатов..."
-
-    cd /opt/remnanode
-
-    # Строки монтирования
-    MOUNT_CERT="      - /etc/ssl/certs/noctua.crt:/etc/ssl/certs/noctua.crt:ro"
-    MOUNT_KEY="      - /etc/ssl/private/noctua.key:/etc/ssl/private/noctua.key:ro"
-
-    # Проверяем, есть ли уже такие строки (чтобы не дублировать)
-    if grep -q "$MOUNT_CERT" "$REMNA_NODE_COMPOSE" && grep -q "$MOUNT_KEY" "$REMNA_NODE_COMPOSE"; then
-        echo "[✓] Монтирование сертификатов уже присутствует в remnanode."
-    else
-        # Создаём бэкап
-        cp "$REMNA_NODE_COMPOSE" "$REMNA_NODE_COMPOSE.bak"
-
-        # Удаляем возможные старые строки (на случай если они частично остались)
-        sed -i "\|$MOUNT_CERT|d" "$REMNA_NODE_COMPOSE"
-        sed -i "\|$MOUNT_KEY|d" "$REMNA_NODE_COMPOSE"
-
-        # Проверяем, есть ли секция volumes у сервиса remnanode
-        if grep -A20 "^  remnanode:" "$REMNA_NODE_COMPOSE" | grep -q "^    volumes:"; then
-            # Секция volumes уже есть – добавляем наши строки в конец блока (перед следующей секцией)
-            # Вставляем строки перед строкой с отступом 2 пробела (закрытие блока)
-            sed -i "/^    volumes:/,/^  / {
-                /^  / i\\
-$MOUNT_CERT
-                /^  / i\\
-$MOUNT_KEY
-            }" "$REMNA_NODE_COMPOSE"
-        else
-            # Секции volumes нет – создаём после строки "    environment:" или "    image:"
-            # Ищем "    environment:" – если есть, вставляем после неё, иначе после "    image:"
-            if grep -q "^    environment:" "$REMNA_NODE_COMPOSE"; then
-                sed -i "/^    environment:/a\\
-    volumes:\\n$MOUNT_CERT\\n$MOUNT_KEY" "$REMNA_NODE_COMPOSE"
-            else
-                sed -i "/^    image:/a\\
-    volumes:\\n$MOUNT_CERT\\n$MOUNT_KEY" "$REMNA_NODE_COMPOSE"
-            fi
-        fi
-
-        # Проверяем синтаксис compose-файла
-        if ! $DOCKER_COMPOSE -f "$REMNA_NODE_COMPOSE" config; then
-            echo "[×] Ошибка в $REMNA_NODE_COMPOSE после добавления монтирования. Восстанавливаем бэкап..."
-            mv "$REMNA_NODE_COMPOSE.bak" "$REMNA_NODE_COMPOSE"
-            exit 1
-        fi
-        rm -f "$REMNA_NODE_COMPOSE.bak"
-
-        echo "[✓] Монтирование сертификатов добавлено в remnanode."
-
-        # Перезапускаем remnanode, чтобы применить изменения
-        echo "[*] Перезапускаем remnanode для применения монтирования..."
-        $DOCKER_COMPOSE -f "$REMNA_NODE_COMPOSE" down
-        $DOCKER_COMPOSE -f "$REMNA_NODE_COMPOSE" up -d
-    fi
-else
-    echo "[!] /opt/remnanode/docker-compose.yml не найден. Монтирование сертификатов в remnanode пропущено."
-fi
+# Добавляем монтирование в remnanode
+add_mount_to_remnanode
 
 # --- Снимаем trap после успешного выполнения ---
 trap - INT TERM
+
+sleep 8
+
+# --- Вывод логов для проверки ---
+echo "[*] Последние 30 строк логов контейнера remnanode:"
+$DOCKER_COMPOSE logs --tail=30
+
+echo "[*] 7 секунд на просмотр логов..."
+sleep 7
 
 echo ""
 echo "[✓] Готово"
 echo "================================================================================"
 echo "[*] Заглушка: https://${DOMAIN} (через fallback Xray)"
 echo "[*] Логин: ${WEB_USER}"
-echo "[*] Пароль: ${WEB_PASSWORD} (сохранён в /opt/remnanode/caddy/.password)"
+echo "[*] Пароль: ${WEB_PASSWORD} (сохранён в $CADDY_DIR/.password)"
 echo "[*] Сертификаты: ${CERT_DIR}"
 echo "[*] Ссылки: /etc/ssl/certs/noctua.crt  и  /etc/ssl/private/noctua.key"
 echo "================================================================================"

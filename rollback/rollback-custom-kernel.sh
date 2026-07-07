@@ -140,8 +140,8 @@ $DOCKER_COMPOSE up -d
 
 sleep 8
 
-echo "[*] Последние 50 строк логов:"
-$DOCKER_COMPOSE logs --tail=50
+echo "[*] Последние 30 строк логов:"
+$DOCKER_COMPOSE logs --tail=30
 
 echo ""
 echo "[✓] Готово, откат кастомного ядра выполнен."

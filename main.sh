@@ -34,7 +34,8 @@ run_script() {
     if [ -z "$args" ]; then
         curl -fsSL --retry 5 --retry-delay 10 "$url" | bash || ret=$?
     else
-        curl -fsSL --retry 5 --retry-delay 10 "$url" | bash -s -- $args || ret=$?
+        # Используем eval для правильной передачи аргументов с пробелами
+        eval "curl -fsSL --retry 5 --retry-delay 10 \"$url\" | bash -s -- $args" || ret=$?
     fi
     if [ $ret -eq 0 ]; then
         echo "[✓] Выполнение завершено успешно."
@@ -69,7 +70,8 @@ ask_caddy_params() {
     local domain api_keys
     read -p "Введите домен (например, example.com): " domain
     read -p "Введите Porkbun ключи (API Key и Secret Key через пробел): " api_keys
-    echo "--domain $domain --porkbun-keys \"$api_keys\""
+    # Возвращаем строку с экранированием через одинарные кавычки
+    echo "--domain $domain --porkbun-keys '$api_keys'"
 }
 
 # --- Комплексная настройка (пункт 1) ---

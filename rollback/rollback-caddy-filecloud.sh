@@ -129,6 +129,12 @@ else
     echo "[!] /opt/remnanode/docker-compose.yml не найден. Пропускаем."
 fi
 
+sleep 8
+
+# --- Вывод логов для проверки ---
+echo "[*] Последние 30 строк логов контейнера remnanode:"
+$DOCKER_COMPOSE logs --tail=30
+
 echo ""
 echo "[✓] Откат Caddy и FileCloud завершён."
 echo "================================================================================"

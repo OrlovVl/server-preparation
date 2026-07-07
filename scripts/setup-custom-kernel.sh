@@ -185,8 +185,8 @@ $DOCKER_COMPOSE up -d
 sleep 8
 
 # Вывод логов
-echo "[*] Последние 50 строк логов:"
-$DOCKER_COMPOSE logs --tail=50
+echo "[*] Последние 30 строк логов:"
+$DOCKER_COMPOSE logs --tail=30
 
 # --- Снимаем trap после успешного выполнения ---
 trap - INT TERM
