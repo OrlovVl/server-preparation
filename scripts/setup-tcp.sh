@@ -397,4 +397,5 @@ trap - INT TERM
 echo -e "\n[✓] Настройки оптимизированы для TCP-ориентированного трафика."
 echo "[*] Бэкапы сохранены в $BACKUP_DIR"
 echo "[*] Для отката используйте: curl -fsSL https://raw.githubusercontent.com/OrlovVl/server-preparation/refs/heads/main/rollback/rollback-tcp.sh | bash"
+sleep 3
 exit 0

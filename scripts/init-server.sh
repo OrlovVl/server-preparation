@@ -139,4 +139,5 @@ trap - INT TERM
 echo ""
 echo "[✓] Базовая подготовка сервера завершена."
 echo "[*] Контейнеры и Volumes из /var/lib/docker не пострадали."
+sleep 3
 exit 0

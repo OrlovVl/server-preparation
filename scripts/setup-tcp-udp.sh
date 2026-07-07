@@ -422,4 +422,5 @@ trap - INT TERM
 echo -e "\n[✓] Настройки оптимизированы для смешанного трафика (TCP + UDP)."
 echo "[*] Бэкапы сохранены в $BACKUP_DIR"
 echo "[*] Для отката используйте: curl -fsSL https://raw.githubusercontent.com/OrlovVl/server-preparation/refs/heads/main/rollback/rollback-tcp-udp.sh | bash"
+sleep 3
 exit 0

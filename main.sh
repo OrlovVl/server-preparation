@@ -77,10 +77,10 @@ ask_caddy_params() {
 # --- Комплексная настройка (пункт 1) ---
 full_setup_tcp() {
     echo "[*] Комплексная настройка: обновление + нода + TCP-оптимизация"
+    local secret=$(ask_secret_key)
+    local tcp_ports=$(ask_tcp_ports)
     run_script "${SCRIPTS_BASE}/init-server.sh"
-    secret=$(ask_secret_key)
     run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"
-    tcp_ports=$(ask_tcp_ports)
     if [ -n "$tcp_ports" ]; then
         run_script "${SCRIPTS_BASE}/setup-tcp.sh" "--tcp-ports $tcp_ports"
     else
@@ -96,16 +96,16 @@ full_setup_tcp() {
 # --- Комплексная настройка (пункт 2) ---
 full_setup_tcp_udp() {
     echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация + Caddy"
+    local secret=$(ask_secret_key)
+    local tcp_ports=$(ask_tcp_ports)
+    local udp_ports=$(ask_udp_ports)
+    local caddy_args=$(ask_caddy_params)
     run_script "${SCRIPTS_BASE}/init-server.sh"
-    secret=$(ask_secret_key)
     run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"
-    tcp_ports=$(ask_tcp_ports)
-    udp_ports=$(ask_udp_ports)
-    args=""
+    local args=""
     [ -n "$tcp_ports" ] && args="$args --tcp-ports $tcp_ports"
     [ -n "$udp_ports" ] && args="$args --udp-ports $udp_ports"
     run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args"
-    caddy_args=$(ask_caddy_params)
     run_script "${SCRIPTS_BASE}/setup-caddy-filecloud.sh" "$caddy_args"
     echo ""
     echo "[✓] Комплексная настройка TCP/UDP завершена."

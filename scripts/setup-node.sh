@@ -147,17 +147,13 @@ if [ $ELAPSED -ge $TIMEOUT ]; then
     exit 1
 fi
 
+# --- Вывод логов в реальном времени ---
+echo "[*] Просмотр логов контейнера remnanode (15 секунд)..."
+timeout 15 $DOCKER_COMPOSE logs -f || true
+echo "[*] Продолжаем выполнение..."
+
 # --- Снимаем trap после успешного выполнения ---
 trap - INT TERM
-
-sleep 8
-
-# --- Вывод логов для проверки ---
-echo "[*] Последние 30 строк логов контейнера remnanode:"
-$DOCKER_COMPOSE logs --tail=30
-
-echo "[*] 7 секунд на просмотр логов..."
-sleep 7
 
 # --- Итоговая информация ---
 echo ""
@@ -171,4 +167,5 @@ echo "[*] Статус: запущен и работает"
 echo "[*] Логи: docker logs remnanode"
 echo "[*] Остановка: $DOCKER_COMPOSE -f /opt/remnanode/docker-compose.yml down"
 echo "================================================================================"
+sleep 3
 exit 0

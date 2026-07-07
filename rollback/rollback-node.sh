@@ -72,4 +72,5 @@ fi
 
 echo ""
 echo "[✓] Откат завершён."
+sleep 3
 exit 0
