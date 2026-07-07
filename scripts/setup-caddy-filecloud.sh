@@ -42,7 +42,7 @@ trap cleanup INT TERM
 
 # --- Установка пакетов ---
 apt-get update
-for pkg in wget unzip curl; do
+for pkg in wget unzip curl apache2-utils; do
     if ! command -v "$pkg" &> /dev/null; then
         echo "[*] Устанавливаем $pkg..."
         apt-get install -y "$pkg"
@@ -121,7 +121,7 @@ rm -rf main.zip server-preparation-main
 
 # --- Хеш пароля ---
 echo "[*] Генерируем хеш пароля для базовой аутентификации..."
-HASHED_PASSWORD=$(docker run --rm caddy:latest caddy hash-password --plaintext "$WEB_PASSWORD" | tail -1)
+HASHED_PASSWORD=$(htpasswd -nbB "$WEB_USER" "$WEB_PASSWORD" | cut -d: -f2)
 
 # --- Создаём .env файл с секретами ---
 cat > /opt/remnanode/caddy/.env <<EOF
