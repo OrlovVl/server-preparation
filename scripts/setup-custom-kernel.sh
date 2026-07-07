@@ -182,9 +182,9 @@ fi
 echo "[*] Запускаем remnanode..."
 $DOCKER_COMPOSE up -d
 
-# --- Вывод логов в реальном времени ---
-echo "[*] Показываем логи контейнера remnanode в реальном времени (15 секунд)..."
-timeout 15 $DOCKER_COMPOSE logs -f || true
+# --- Вывод логов remnanode ---
+echo "[*] Просмотр логов контейнера remnanode (15 секунд)..."
+timeout 15 $DOCKER_COMPOSE -f /opt/remnanode/docker-compose.yml logs -f || true
 echo "[*] Продолжаем выполнение..."
 
 # --- Снимаем trap после успешного выполнения ---
@@ -195,5 +195,5 @@ echo "[✓] Готово, Xray-core ${KERNEL_VERSION} установлен."
 echo "[*] Проверьте выведенные логи для подтверждения корректности работы."
 echo "[*] Проверка версии: docker exec remnanode /usr/local/bin/xray version"
 echo "================================================================================"
-sleep 3
+sleep 2
 exit 0

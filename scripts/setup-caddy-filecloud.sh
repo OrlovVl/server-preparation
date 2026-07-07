@@ -382,9 +382,9 @@ fi
 # Добавляем монтирование в remnanode
 add_mount_to_remnanode
 
-# --- Вывод логов в реальном времени ---
-echo "[*] Показываем логи контейнера remnanode в реальном времени (15 секунд)..."
-timeout 15 $DOCKER_COMPOSE logs -f || true
+# --- Вывод логов remnanode ---
+echo "[*] Просмотр логов контейнера remnanode (15 секунд)..."
+timeout 15 $DOCKER_COMPOSE -f /opt/remnanode/docker-compose.yml logs -f || true
 echo "[*] Продолжаем выполнение..."
 
 # --- Снимаем trap после успешного выполнения ---
@@ -399,5 +399,5 @@ echo "[*] Пароль: ${WEB_PASSWORD} (сохранён в $CADDY_DIR/.passwor
 echo "[*] Сертификаты: ${CERT_DIR}"
 echo "[*] Ссылки: /etc/ssl/certs/noctua.crt  и  /etc/ssl/private/noctua.key"
 echo "================================================================================"
-sleep 3
+sleep 2
 exit 0

@@ -138,14 +138,13 @@ fi
 echo "[*] Запускаем remnanode без кастомного xray..."
 $DOCKER_COMPOSE up -d
 
-# --- Вывод логов в реальном времени ---
-echo "[*] Показываем логи контейнера remnanode в реальном времени (15 секунд)..."
-timeout 15 $DOCKER_COMPOSE logs -f || true
+# --- Вывод логов remnanode ---
+echo "[*] Просмотр логов контейнера remnanode (15 секунд)..."
+timeout 15 $DOCKER_COMPOSE -f /opt/remnanode/docker-compose.yml logs -f || true
 echo "[*] Продолжаем выполнение..."
 
 echo ""
 echo "[✓] Готово, откат кастомного ядра выполнен."
 echo "[*] Контейнер перезапущен с оригинальным xray."
 echo "================================================================================"
-sleep 3
 exit 0

@@ -129,9 +129,9 @@ else
     echo "[!] /opt/remnanode/docker-compose.yml не найден. Пропускаем."
 fi
 
-# --- Вывод логов в реальном времени ---
-echo "[*] Показываем логи контейнера remnanode в реальном времени (15 секунд)..."
-timeout 15 $DOCKER_COMPOSE logs -f || true
+# --- Вывод логов remnanode ---
+echo "[*] Просмотр логов контейнера remnanode (15 секунд)..."
+timeout 15 $DOCKER_COMPOSE -f /opt/remnanode/docker-compose.yml logs -f || true
 echo "[*] Продолжаем выполнение..."
 
 echo ""
@@ -143,5 +143,4 @@ echo "[*] Симлинки сертификатов удалены."
 echo "[*] Монтирование сертификатов из remnanode удалено (если было)."
 echo "[*] remnanode перезапущен (если существовал)."
 echo "================================================================================"
-sleep 3
 exit 0

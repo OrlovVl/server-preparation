@@ -32,8 +32,8 @@ fi
 
 # --- 1. Остановка всех служб Docker ---
 echo "[*] Останавливаем все службы Docker..."
-systemctl stop docker.service || true
 systemctl stop docker.socket || true
+systemctl stop docker.service || true
 systemctl stop containerd || true
 
 # --- 2. Удаление всех пакетов Docker и Compose (включая плагины) ---
@@ -139,5 +139,5 @@ trap - INT TERM
 echo ""
 echo "[✓] Базовая подготовка сервера завершена."
 echo "[*] Контейнеры и Volumes из /var/lib/docker не пострадали."
-sleep 3
+sleep 2
 exit 0
