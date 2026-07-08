@@ -254,10 +254,8 @@ SYSCTL_MARKER_START="# === server-preparation-tcp-udp-start ==="
 SYSCTL_MARKER_END="# === server-preparation-tcp-udp-end ==="
 
 echo "[*] Очищаем старые настройки sysctl..."
-# Удаляем старый блок, если есть
 sed -i "/$SYSCTL_MARKER_START/,/$SYSCTL_MARKER_END/d" /etc/sysctl.conf
 
-# Добавляем новый блок с маркерами
 cat << EOF >> /etc/sysctl.conf
 $SYSCTL_MARKER_START
 # Отключение IPv6
@@ -272,14 +270,22 @@ net.ipv4.tcp_congestion_control = bbr
 # Увеличенные буферы для UDP и больших объёмов данных
 net.core.rmem_max = 16777216
 net.core.wmem_max = 16777216
-net.core.rmem_default = 262144
-net.core.wmem_default = 262144
+net.core.rmem_default = 1048576
+net.core.wmem_default = 1048576
 net.ipv4.udp_rmem_min = 16384
 net.ipv4.udp_wmem_min = 16384
 
 # Увеличенные очереди
-net.core.netdev_max_backlog = 10000
-net.core.somaxconn = 4096
+net.core.netdev_max_backlog = 32768
+net.core.somaxconn = 65535
+net.ipv4.tcp_max_syn_backlog = 8192
+
+# TCP Fast Open
+net.ipv4.tcp_fastopen = 3
+
+# Дополнительные оптимизации
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_slow_start_after_idle = 0
 
 # Ускоренное освобождение TIME_WAIT
 net.ipv4.tcp_tw_reuse = 1
@@ -293,12 +299,8 @@ net.ipv4.tcp_keepalive_probes = 5
 
 # защита
 net.ipv4.tcp_syncookies = 1
-net.ipv4.tcp_max_syn_backlog = 2048
 
 vm.swappiness = 10
-
-# TCP Fast Open
-net.ipv4.tcp_fastopen = 3
 $SYSCTL_MARKER_END
 EOF
 
@@ -314,9 +316,15 @@ sysctl -p /etc/sysctl.conf
 [ -f /etc/default/ufw ] && sed -i 's/IPV6=yes/IPV6=no/g' /etc/default/ufw
 
 # --- ulimit ---
-if ! grep -q "nofile 65535" /etc/security/limits.conf; then
-  echo -e "* soft nofile 65535\n* hard nofile 65535\nroot soft nofile 65535\nroot hard nofile 65535" >> /etc/security/limits.conf
+if ! grep -q "nofile 1048576" /etc/security/limits.conf; then
+  echo -e "* soft nofile 1048576\n* hard nofile 1048576\nroot soft nofile 1048576\nroot hard nofile 1048576" >> /etc/security/limits.conf
 fi
+
+cat > /etc/sysctl.d/99-remnanode.conf <<'EOF'
+fs.file-max = 1048576
+fs.nr_open = 1048576
+EOF
+sysctl -p /etc/sysctl.d/99-remnanode.conf || true
 
 # --- Настройка UFW правил ---
 if command -v ufw >/dev/null 2>&1; then

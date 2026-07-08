@@ -15,12 +15,25 @@ REPO_BASE="https://raw.githubusercontent.com/OrlovVl/server-preparation/refs/hea
 SCRIPTS_BASE="${REPO_BASE}/scripts"
 ROLLBACK_BASE="${REPO_BASE}/rollback"
 
+# --- Чтение активного профиля ---
+get_active_profile() {
+    if [[ -f "/opt/remnanode/.profile" ]]; then
+        cat "/opt/remnanode/.profile"
+    else
+        echo "none"
+    fi
+}
+
 # --- Функция вывода заголовка ---
 print_header() {
     clear
+    local profile=$(get_active_profile)
     echo "================================================================================"
     echo "                    МАСТЕР-СКРИПТ НАСТРОЙКИ СЕРВЕРА"
+    echo "                       Активный профиль: $profile"
     echo "================================================================================"
+    local profile=$(get_active_profile)
+    echo "  Активный профиль: $profile"
     echo ""
 }
 
@@ -34,7 +47,6 @@ run_script() {
     if [ -z "$args" ]; then
         curl -fsSL --retry 5 --retry-delay 10 "$url" | bash || ret=$?
     else
-        # Используем eval для правильной передачи аргументов с пробелами
         eval "curl -fsSL --retry 5 --retry-delay 10 \"$url\" | bash -s -- $args" || ret=$?
     fi
     if [ $ret -eq 0 ]; then
@@ -66,15 +78,20 @@ ask_udp_ports() {
     echo "$ports"
 }
 
-ask_caddy_params() {
-    local domain api_keys
-    read -p "Введите домен (например, example.com): " domain
-    read -p "Введите Porkbun ключи (API Key и Secret Key через пробел): " api_keys
-    # Возвращаем строку с экранированием через одинарные кавычки
-    echo "--domain $domain --porkbun-keys '$api_keys'"
+ask_domain() {
+    read -p "Введите домен для сертификата (например, example.com): " domain
+    echo "$domain"
 }
 
-# --- Комплексная настройка (пункт 1) ---
+ask_email() {
+    local domain="$1"
+    read -p "Введите email для Let's Encrypt (оставьте пустым для admin@$domain): " email
+    [[ -z "$email" ]] && echo "admin@$domain" || echo "$email"
+}
+
+# --- КОМПЛЕКСНЫЕ НАСТРОЙКИ ---
+
+# 1. TCP (без заглушки)
 full_setup_tcp() {
     echo "[*] Комплексная настройка: обновление + нода + TCP-оптимизация"
     local secret=$(ask_secret_key)
@@ -88,88 +105,132 @@ full_setup_tcp() {
     fi
     echo ""
     echo "[✓] Комплексная настройка TCP завершена."
-    echo "Для отката TCP-оптимизации используйте пункт меню 3."
-    echo "Для удаления ноды используйте пункт меню 15."
+    echo "Для отката используйте пункт меню 5."
+    echo "Для удаления ноды используйте пункт 19."
     read -p "Нажмите Enter для продолжения..."
 }
 
-# --- Комплексная настройка (пункт 2) ---
+# 2. TCP/UDP (без заглушки)
 full_setup_tcp_udp() {
-    echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация + Caddy"
+    echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация"
     local secret=$(ask_secret_key)
     local tcp_ports=$(ask_tcp_ports)
     local udp_ports=$(ask_udp_ports)
-    local caddy_args=$(ask_caddy_params)
-    run_script "${SCRIPTS_BASE}/init-server.sh"
-    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"
     local args=""
     [ -n "$tcp_ports" ] && args="$args --tcp-ports $tcp_ports"
     [ -n "$udp_ports" ] && args="$args --udp-ports $udp_ports"
+    run_script "${SCRIPTS_BASE}/init-server.sh"
+    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"
     run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args"
-    run_script "${SCRIPTS_BASE}/setup-caddy-filecloud.sh" "$caddy_args"
     echo ""
     echo "[✓] Комплексная настройка TCP/UDP завершена."
-    echo "Для отката Caddy и TCP/UDP-оптимизации используйте пункт меню 4."
-    echo "Для удаления ноды используйте пункт меню 15."
+    echo "Для отката используйте пункт меню 6."
+    echo "Для удаления ноды используйте пункт 19."
     read -p "Нажмите Enter для продолжения..."
 }
 
-# --- Комплексный откат TCP (пункт 3) — только TCP, не трогаем ноду ---
-rollback_full_tcp() {
-    echo "[*] Комплексный откат TCP: откатываем TCP-оптимизацию (нода остаётся)"
-    echo "Выполняется откат TCP..."
+# 3. TCP + Nginx + acme (заглушка)
+full_setup_tcp_nginx() {
+    echo "[*] Комплексная настройка: обновление + нода + TCP-оптимизация + Nginx + acme (заглушка)"
+    local secret=$(ask_secret_key)
+    local tcp_ports=$(ask_tcp_ports)
+    local domain=$(ask_domain)
+    local email=$(ask_email "$domain")
+    run_script "${SCRIPTS_BASE}/init-server.sh"
+    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"
+    if [ -n "$tcp_ports" ]; then
+        run_script "${SCRIPTS_BASE}/setup-tcp.sh" "--tcp-ports $tcp_ports"
+    else
+        run_script "${SCRIPTS_BASE}/setup-tcp.sh"
+    fi
+    run_script "${SCRIPTS_BASE}/setup-nginx-acme.sh" "--domain $domain --email $email"
+    echo ""
+    echo "[✓] Комплексная настройка TCP + Nginx завершена."
+    echo "Для отката используйте пункт меню 7."
+    echo "Для удаления ноды используйте пункт 19."
+    read -p "Нажмите Enter для продолжения..."
+}
+
+# 4. TCP/UDP + Nginx + acme (заглушка)
+full_setup_tcp_udp_nginx() {
+    echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация + Nginx + acme (заглушка)"
+    local secret=$(ask_secret_key)
+    local tcp_ports=$(ask_tcp_ports)
+    local udp_ports=$(ask_udp_ports)
+    local domain=$(ask_domain)
+    local email=$(ask_email "$domain")
+    local args=""
+    [ -n "$tcp_ports" ] && args="$args --tcp-ports $tcp_ports"
+    [ -n "$udp_ports" ] && args="$args --udp-ports $udp_ports"
+    run_script "${SCRIPTS_BASE}/init-server.sh"
+    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"
+    run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args"
+    run_script "${SCRIPTS_BASE}/setup-nginx-acme.sh" "--domain $domain --email $email"
+    echo ""
+    echo "[✓] Комплексная настройка TCP/UDP + Nginx завершена."
+    echo "Для отката используйте пункт меню 8."
+    echo "Для удаления ноды используйте пункт 19."
+    read -p "Нажмите Enter для продолжения..."
+}
+
+# --- КОМПЛЕКСНЫЕ ОТКАТЫ (нода не удаляется) ---
+
+rollback_tcp() {
     run_script "${ROLLBACK_BASE}/rollback-tcp.sh"
-    echo ""
-    echo "[✓] Комплексный откат TCP завершён."
-    echo "Нода не была удалена. При необходимости удалите ноду через пункт меню 15."
-    echo "init-server.sh не откатывается, система остаётся обновлённой."
     read -p "Нажмите Enter для продолжения..."
 }
 
-# --- Комплексный откат TCP/UDP (пункт 4) — откатываем Caddy и TCP/UDP, ноду не трогаем ---
-rollback_full_tcp_udp() {
-    echo "[*] Комплексный откат TCP/UDP: откатываем Caddy и TCP/UDP-оптимизацию (нода остаётся)"
-    echo "Выполняется откат Caddy+FileCloud..."
-    run_script "${ROLLBACK_BASE}/rollback-caddy-filecloud.sh"
-    echo "Выполняется откат TCP/UDP-оптимизации..."
+rollback_tcp_udp() {
     run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh"
-    echo ""
-    echo "[✓] Комплексный откат TCP/UDP завершён."
-    echo "Нода не была удалена. При необходимости удалите ноду через пункт меню 15."
-    echo "init-server.sh не откатывается, система остаётся обновлённой."
     read -p "Нажмите Enter для продолжения..."
 }
 
-# --- Основной цикл ---
+rollback_tcp_nginx() {
+    run_script "${ROLLBACK_BASE}/rollback-tcp.sh"
+    run_script "${ROLLBACK_BASE}/rollback-nginx.sh"
+    read -p "Нажмите Enter для продолжения..."
+}
+
+rollback_tcp_udp_nginx() {
+    run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh"
+    run_script "${ROLLBACK_BASE}/rollback-nginx.sh"
+    read -p "Нажмите Enter для продолжения..."
+}
+
+# --- ОСНОВНОЙ ЦИКЛ ---
 while true; do
     print_header
     echo "Выберите действие:"
     echo ""
     echo "  === КОМПЛЕКСНЫЕ НАСТРОЙКИ ==="
-    echo "  1. Полная настройка под TCP (обновление + нода + TCP-оптимизация)"
-    echo "  2. Полная настройка под TCP/UDP (обновление + нода + TCP/UDP + Caddy)"
+    echo "  1. TCP (обновление + нода + TCP-оптимизация)"
+    echo "  2. TCP/UDP (обновление + нода + TCP/UDP-оптимизация)"
+    echo "  3. TCP + Nginx + acme (заглушка)"
+    echo "  4. TCP/UDP + Nginx + acme (заглушка)"
     echo ""
     echo "  === КОМПЛЕКСНЫЕ ОТКАТЫ (нода не удаляется) ==="
-    echo "  3. Откат TCP-оптимизации (нода остаётся)"
-    echo "  4. Откат Caddy + TCP/UDP-оптимизации (нода остаётся)"
+    echo "  5. Откат TCP"
+    echo "  6. Откат TCP/UDP"
+    echo "  7. Откат TCP + Nginx"
+    echo "  8. Откат TCP/UDP + Nginx"
     echo ""
     echo "  === ОТДЕЛЬНЫЕ ДЕЙСТВИЯ (УСТАНОВКА/НАСТРОЙКА) ==="
-    echo "  5. Базовая подготовка сервера (обновление + Docker)"
-    echo "  6. Установка ноды (RemnaNode)"
-    echo "  7. Установка кастомного Xray-core"
-    echo "  8. Настройка TCP-оптимизации (с доп. портами)"
-    echo "  9. Настройка TCP/UDP-оптимизации (с доп. портами)"
-    echo " 10. Настройка Caddy + FileCloud (сертификаты Porkbun)"
+    echo "  9. Базовая подготовка сервера (обновление + Docker)"
+    echo " 10. Установка ноды (RemnaNode)"
+    echo " 11. Установка кастомного Xray-core"
+    echo " 12. Настройка TCP-оптимизации (с доп. портами)"
+    echo " 13. Настройка TCP/UDP-оптимизации (с доп. портами)"
+    echo " 14. Настройка Nginx + acme (заглушка)"
     echo ""
     echo "  === ОТДЕЛЬНЫЕ ОТКАТЫ ==="
-    echo " 11. Откат кастомного Xray-core"
-    echo " 12. Откат TCP-оптимизации"
-    echo " 13. Откат TCP/UDP-оптимизации"
-    echo " 14. Откат Caddy + FileCloud"
-    echo " 15. Откат ноды (удаление контейнера и файлов)"
+    echo " 15. Откат кастомного Xray-core"
+    echo " 16. Откат TCP-оптимизации"
+    echo " 17. Откат TCP/UDP-оптимизации"
+    echo " 18. Откат Nginx + acme (заглушка)"
+    echo " 19. Откат ноды (удаление контейнера и файлов)"
     echo ""
     echo "  === СИСТЕМНЫЕ ==="
-    echo " 16. Перезагрузка сервера"
+    echo " 20. Перезагрузка сервера"
     echo "  0. Выход"
     echo ""
     read -p "Введите номер пункта: " choice
@@ -177,20 +238,24 @@ while true; do
     case $choice in
         1) full_setup_tcp ;;
         2) full_setup_tcp_udp ;;
-        3) rollback_full_tcp ;;
-        4) rollback_full_tcp_udp ;;
-        5) run_script "${SCRIPTS_BASE}/init-server.sh"; read -p "Нажмите Enter..." ;;
-        6) secret=$(ask_secret_key); run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"; read -p "Нажмите Enter..." ;;
-        7) version=$(ask_kernel_version); run_script "${SCRIPTS_BASE}/setup-custom-kernel.sh" "--version $version"; read -p "Нажмите Enter..." ;;
-        8) tcp_ports=$(ask_tcp_ports); [ -n "$tcp_ports" ] && args="--tcp-ports $tcp_ports" || args=""; run_script "${SCRIPTS_BASE}/setup-tcp.sh" "$args"; read -p "Нажмите Enter..." ;;
-        9) tcp_ports=$(ask_tcp_ports); udp_ports=$(ask_udp_ports); args=""; [ -n "$tcp_ports" ] && args="$args --tcp-ports $tcp_ports"; [ -n "$udp_ports" ] && args="$args --udp-ports $udp_ports"; run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args"; read -p "Нажмите Enter..." ;;
-        10) caddy_args=$(ask_caddy_params); run_script "${SCRIPTS_BASE}/setup-caddy-filecloud.sh" "$caddy_args"; read -p "Нажмите Enter..." ;;
-        11) run_script "${ROLLBACK_BASE}/rollback-custom-kernel.sh"; read -p "Нажмите Enter..." ;;
-        12) run_script "${ROLLBACK_BASE}/rollback-tcp.sh"; read -p "Нажмите Enter..." ;;
-        13) run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh"; read -p "Нажмите Enter..." ;;
-        14) run_script "${ROLLBACK_BASE}/rollback-caddy-filecloud.sh"; read -p "Нажмите Enter..." ;;
-        15) run_script "${ROLLBACK_BASE}/rollback-node.sh"; read -p "Нажмите Enter..." ;;
-        16) echo "[*] Перезагрузка сервера..."; reboot ;;
+        3) full_setup_tcp_nginx ;;
+        4) full_setup_tcp_udp_nginx ;;
+        5) rollback_tcp ;;
+        6) rollback_tcp_udp ;;
+        7) rollback_tcp_nginx ;;
+        8) rollback_tcp_udp_nginx ;;
+        9) run_script "${SCRIPTS_BASE}/init-server.sh"; read -p "Нажмите Enter..." ;;
+        10) secret=$(ask_secret_key); run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"; read -p "Нажмите Enter..." ;;
+        11) version=$(ask_kernel_version); run_script "${SCRIPTS_BASE}/setup-custom-kernel.sh" "--version $version"; read -p "Нажмите Enter..." ;;
+        12) tcp_ports=$(ask_tcp_ports); [ -n "$tcp_ports" ] && args="--tcp-ports $tcp_ports" || args=""; run_script "${SCRIPTS_BASE}/setup-tcp.sh" "$args"; read -p "Нажмите Enter..." ;;
+        13) tcp_ports=$(ask_tcp_ports); udp_ports=$(ask_udp_ports); args=""; [ -n "$tcp_ports" ] && args="$args --tcp-ports $tcp_ports"; [ -n "$udp_ports" ] && args="$args --udp-ports $udp_ports"; run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args"; read -p "Нажмите Enter..." ;;
+        14) domain=$(ask_domain); email=$(ask_email "$domain"); run_script "${SCRIPTS_BASE}/setup-nginx-acme.sh" "--domain $domain --email $email"; read -p "Нажмите Enter..." ;;
+        15) run_script "${ROLLBACK_BASE}/rollback-custom-kernel.sh"; read -p "Нажмите Enter..." ;;
+        16) run_script "${ROLLBACK_BASE}/rollback-tcp.sh"; read -p "Нажмите Enter..." ;;
+        17) run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh"; read -p "Нажмите Enter..." ;;
+        18) run_script "${ROLLBACK_BASE}/rollback-nginx.sh"; read -p "Нажмите Enter..." ;;
+        19) run_script "${ROLLBACK_BASE}/rollback-node.sh"; read -p "Нажмите Enter..." ;;
+        20) echo "[*] Перезагрузка сервера..."; reboot ;;
         0) echo "[✓] Выход."; exit 0 ;;
         *) echo "[×] Неверный пункт."; read -p "Нажмите Enter..." ;;
     esac

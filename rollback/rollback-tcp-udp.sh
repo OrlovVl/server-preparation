@@ -65,6 +65,12 @@ if [ -f "${BACKUP_DIR}/ufw_status.txt" ]; then
   fi
 fi
 
+# Удаляем файл с настройками лимитов (если он существует)
+if [[ -f "/etc/sysctl.d/99-remnanode.conf" ]]; then
+  rm -f /etc/sysctl.d/99-remnanode.conf
+  echo "  [✓] удалён /etc/sysctl.d/99-remnanode.conf"
+fi
+
 sysctl -p /etc/sysctl.conf
 
 if [ -f "$ACTIVE_FILE" ] && [ "$(cat "$ACTIVE_FILE")" = "tcp-udp" ]; then
