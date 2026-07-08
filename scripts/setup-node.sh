@@ -82,16 +82,25 @@ cleanup() {
 }
 trap cleanup INT TERM
 
+# --- Проверка существующего контейнера ---
+EXISTING_SECRET=""
+if docker ps -a --format '{{.Names}}' | grep -q "^remnanode$"; then
+    EXISTING_SECRET=$(docker inspect remnanode --format='{{index .Config.Env 1}}' 2>/dev/null | cut -d= -f2)
+    if [[ "$EXISTING_SECRET" == "$SECRET_KEY" ]]; then
+        echo "[✓] Контейнер remnanode уже существует с таким же SECRET_KEY. Пропускаем переустановку."
+        echo "Для принудительной переустановки удалите контейнер вручную, запустите удаление ноды или измените SECRET_KEY."
+        exit 0
+    else
+        echo "[!] Контейнер существует, но SECRET_KEY отличается. Удаляем старый контейнер и compose-файл..."
+        docker stop remnanode || true
+        docker rm remnanode || true
+        rm -f /opt/remnanode/docker-compose.yml
+    fi
+fi
+
 # --- Создание рабочей директории ---
 echo "[*] Создаём /opt/remnanode..."
 mkdir -p /opt/remnanode
-
-# --- Остановка и удаление старого контейнера (если есть) ---
-if docker ps -a --format '{{.Names}}' | grep -q "^remnanode$"; then
-    echo "[*] Останавливаем и удаляем старый контейнер remnanode..."
-    docker stop remnanode || true
-    docker rm remnanode || true
-fi
 
 # --- Создание docker-compose.yml ---
 echo "[*] Генерируем docker-compose.yml..."
@@ -124,7 +133,7 @@ echo "[*] Ожидаем запуска контейнера remnanode (Ctrl+C �
 TIMEOUT=120
 ELAPSED=0
 while [ $ELAPSED -lt $TIMEOUT ]; do
-    STATUS=$(docker inspect --format='{{.State.Status}}' remnanode)
+    STATUS=$(docker inspect --format='{{.State.Status}}' remnanode 2>/dev/null || echo "missing")
     if [ "$STATUS" = "running" ]; then
         echo ""
         echo "[✓] Контейнер remnanode успешно запущен."

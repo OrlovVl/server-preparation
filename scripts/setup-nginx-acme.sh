@@ -123,7 +123,7 @@ else
 fi
 
 # --- Установка сертификатов ---
-CERT_DIR="/etc/remna-certs/$DOMAIN"
+CERT_DIR="/etc/node-certs/$DOMAIN"
 mkdir -p "$CERT_DIR"
 "$ACME" --install-cert -d "$DOMAIN" --ecc \
     --key-file "$CERT_DIR/key.pem" \
@@ -152,10 +152,7 @@ fi
 # --- Настройка Nginx с Basic Auth ---
 # Создаём файл паролей
 HTPASSWD_FILE="/etc/nginx/.htpasswd"
-htpasswd -bBc "$HTPASSWD_FILE" "$WEB_USER" "$WEB_PASSWORD" 2>/dev/null || {
-    # Если файл уже существует, добавляем пользователя
-    htpasswd -bB "$HTPASSWD_FILE" "$WEB_USER" "$WEB_PASSWORD"
-}
+htpasswd -bBc "$HTPASSWD_FILE" "$WEB_USER" "$WEB_PASSWORD"
 chmod 644 "$HTPASSWD_FILE"
 
 # Создаём конфиг сайта
@@ -187,19 +184,11 @@ ln -sf /etc/nginx/sites-available/filecloud /etc/nginx/sites-enabled/
 # Проверка конфига
 nginx -t || { echo "[×] Ошибка в конфигурации Nginx."; exit 1; }
 
-# --- Открываем 80 порт (если ещё не открыт) ---
-if command -v ufw &> /dev/null; then
-    if ! ufw status | grep -q "80/tcp"; then
-        ufw allow 80/tcp
-        echo "[✓] Порт 80 открыт на постоянной основе."
-    fi
-fi
-
 # --- Перезапуск Nginx ---
 systemctl enable nginx
 systemctl restart nginx
 
-# --- Монтирование сертификатов в контейнер remnanode ---
+# --- Монтирование сертификатов в контейнер remnanode (без симлинков) ---
 add_mount_to_remnanode() {
     local compose_file="/opt/remnanode/docker-compose.yml"
     if [[ ! -f "$compose_file" ]]; then
@@ -207,14 +196,8 @@ add_mount_to_remnanode() {
         return 1
     fi
     echo "[*] Проверяем монтирование сертификатов в remnanode..."
-    local mount_cert="      - /etc/ssl/certs/noctua.crt:/etc/ssl/certs/noctua.crt:ro"
-    local mount_key="      - /etc/ssl/private/noctua.key:/etc/ssl/private/noctua.key:ro"
-
-    # В setup-nginx мы используем симлинки на сертификаты из /etc/remna-certs
-    # Создаём симлинки, если их нет
-    mkdir -p /etc/ssl/certs /etc/ssl/private
-    ln -sf "$CERT_DIR/fullchain.pem" /etc/ssl/certs/noctua.crt
-    ln -sf "$CERT_DIR/key.pem" /etc/ssl/private/noctua.key
+    local mount_cert="      - $CERT_DIR/fullchain.pem:/etc/ssl/certs/noctua.crt:ro"
+    local mount_key="      - $CERT_DIR/key.pem:/etc/ssl/private/noctua.key:ro"
 
     if grep -q "$mount_cert" "$compose_file" && grep -q "$mount_key" "$compose_file"; then
         echo "[✓] Монтирование сертификатов уже присутствует в remnanode."

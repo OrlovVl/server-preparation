@@ -33,7 +33,6 @@ print_header() {
     echo "                       Активный профиль: $profile"
     echo "================================================================================"
     local profile=$(get_active_profile)
-    echo "  Активный профиль: $profile"
     echo ""
 }
 
@@ -103,6 +102,9 @@ full_setup_tcp() {
     else
         run_script "${SCRIPTS_BASE}/setup-tcp.sh"
     fi
+    # --- Создание маркера профиля ---
+    mkdir -p /opt/remnanode
+    echo "1. tcp" > /opt/remnanode/.profile
     echo ""
     echo "[✓] Комплексная настройка TCP завершена."
     echo "Для отката используйте пункт меню 5."
@@ -110,7 +112,7 @@ full_setup_tcp() {
     read -p "Нажмите Enter для продолжения..."
 }
 
-# 2. TCP/UDP (без заглушки)
+# 2. TCP-UDP (без заглушки)
 full_setup_tcp_udp() {
     echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация"
     local secret=$(ask_secret_key)
@@ -122,6 +124,9 @@ full_setup_tcp_udp() {
     run_script "${SCRIPTS_BASE}/init-server.sh"
     run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"
     run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args"
+    # --- Создание маркера профиля ---
+    mkdir -p /opt/remnanode
+    echo "2. tcp-udp" > /opt/remnanode/.profile
     echo ""
     echo "[✓] Комплексная настройка TCP/UDP завершена."
     echo "Для отката используйте пункт меню 6."
@@ -144,6 +149,9 @@ full_setup_tcp_nginx() {
         run_script "${SCRIPTS_BASE}/setup-tcp.sh"
     fi
     run_script "${SCRIPTS_BASE}/setup-nginx-acme.sh" "--domain $domain --email $email"
+    # --- Создание маркера профиля ---
+    mkdir -p /opt/remnanode
+    echo "3. tcp-nginx-cert" > /opt/remnanode/.profile
     echo ""
     echo "[✓] Комплексная настройка TCP + Nginx завершена."
     echo "Для отката используйте пункт меню 7."
@@ -151,7 +159,7 @@ full_setup_tcp_nginx() {
     read -p "Нажмите Enter для продолжения..."
 }
 
-# 4. TCP/UDP + Nginx + acme (заглушка)
+# 4. TCP-UDP + Nginx + acme (заглушка)
 full_setup_tcp_udp_nginx() {
     echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация + Nginx + acme (заглушка)"
     local secret=$(ask_secret_key)
@@ -166,6 +174,9 @@ full_setup_tcp_udp_nginx() {
     run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"
     run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args"
     run_script "${SCRIPTS_BASE}/setup-nginx-acme.sh" "--domain $domain --email $email"
+    # --- Создание маркера профиля ---
+    mkdir -p /opt/remnanode
+    echo "4. tcp-udp-nginx-cert" > /opt/remnanode/.profile
     echo ""
     echo "[✓] Комплексная настройка TCP/UDP + Nginx завершена."
     echo "Для отката используйте пункт меню 8."
@@ -177,23 +188,39 @@ full_setup_tcp_udp_nginx() {
 
 rollback_tcp() {
     run_script "${ROLLBACK_BASE}/rollback-tcp.sh"
+    if [[ -f "/opt/remnanode/.profile" ]] && grep -q "1. tcp" "/opt/remnanode/.profile"; then
+        rm -f "/opt/remnanode/.profile"
+        echo "[✓] Маркер профиля удалён."
+    fi
     read -p "Нажмите Enter для продолжения..."
 }
 
 rollback_tcp_udp() {
     run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh"
+    if [[ -f "/opt/remnanode/.profile" ]] && grep -q "2. tcp-udp" "/opt/remnanode/.profile"; then
+        rm -f "/opt/remnanode/.profile"
+        echo "[✓] Маркер профиля удалён."
+    fi
     read -p "Нажмите Enter для продолжения..."
 }
 
 rollback_tcp_nginx() {
     run_script "${ROLLBACK_BASE}/rollback-tcp.sh"
     run_script "${ROLLBACK_BASE}/rollback-nginx.sh"
+    if [[ -f "/opt/remnanode/.profile" ]] && grep -q "3. tcp-nginx-cert" "/opt/remnanode/.profile"; then
+        rm -f "/opt/remnanode/.profile"
+        echo "[✓] Маркер профиля удалён."
+    fi
     read -p "Нажмите Enter для продолжения..."
 }
 
 rollback_tcp_udp_nginx() {
     run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh"
     run_script "${ROLLBACK_BASE}/rollback-nginx.sh"
+    if [[ -f "/opt/remnanode/.profile" ]] && grep -q "4. tcp-udp-nginx-cert" "/opt/remnanode/.profile"; then
+        rm -f "/opt/remnanode/.profile"
+        echo "[✓] Маркер профиля удалён."
+    fi
     read -p "Нажмите Enter для продолжения..."
 }
 
