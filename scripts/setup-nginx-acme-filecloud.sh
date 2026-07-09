@@ -112,21 +112,38 @@ if command -v ufw &> /dev/null; then
     fi
 fi
 
-if "$ACME" --list 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$DOMAIN"; then
-    echo "[✓] Сертификат уже существует, пропускаем issue."
+CERT_DOMAIN="$DOMAIN"
+CERT_DIR_ACME="/root/.acme.sh/${CERT_DOMAIN}_ecc"
+NEED_ISSUE=false
+
+# Проверяем, существует ли домен в списке acme.sh
+if "$ACME" --list 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$CERT_DOMAIN"; then
+    # Проверяем наличие файлов сертификата
+    if [[ -f "$CERT_DIR_ACME/${CERT_DOMAIN}.key" && -f "$CERT_DIR_ACME/fullchain.cer" ]]; then
+        echo "[✓] Сертификат уже существует, пропускаем issue."
+    else
+        echo "[!] Сертификат найден в списке, но файлы отсутствуют. Перевыпускаем..."
+        "$ACME" --remove -d "$CERT_DOMAIN" 2>/dev/null || true
+        NEED_ISSUE=true
+    fi
 else
-    # Останавливаем nginx перед выпуском (освобождаем порт 80)
-    # pre-hook и post-hook также будут использоваться при автоматическом обновлении через cron
-    "$ACME" --issue --standalone -d "$DOMAIN" --keylength ec-256 \
+    NEED_ISSUE=true
+fi
+
+if [[ "$NEED_ISSUE" == true ]]; then
+    # Останавливаем nginx перед выпуском (если он запущен)
+    systemctl stop nginx 2>/dev/null || true
+    echo "[*] Выпускаем сертификат (standalone)..."
+    "$ACME" --issue --standalone -d "$CERT_DOMAIN" --keylength ec-256 \
         --pre-hook "systemctl stop nginx 2>/dev/null || true" \
-        --post-hook "systemctl start nginx 2>/dev/null || true" \
-        || {
+        --post-hook "systemctl start nginx 2>/dev/null || true" || {
             echo "[×] Не удалось выпустить сертификат. Проверьте DNS и доступность порта 80."
-            # Восстанавливаем nginx
             systemctl start nginx 2>/dev/null || true
             exit 1
         }
-fi
+    systemctl start nginx 2>/dev/null || true
+    echo "[✓] Сертификат успешно выпущен."
+fi 
 
 # --- Установка сертификатов ---
 CERT_DIR="/etc/node-certs/$DOMAIN"
