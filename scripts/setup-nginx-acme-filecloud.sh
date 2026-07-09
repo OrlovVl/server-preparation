@@ -115,10 +115,17 @@ fi
 if "$ACME" --list 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$DOMAIN"; then
     echo "[✓] Сертификат уже существует, пропускаем issue."
 else
-    "$ACME" --issue --standalone -d "$DOMAIN" --keylength ec-256 || {
-        echo "[×] Не удалось выпустить сертификат. Проверьте DNS и доступность порта 80."
-        exit 1
-    }
+    # Останавливаем nginx перед выпуском (освобождаем порт 80)
+    # pre-hook и post-hook также будут использоваться при автоматическом обновлении через cron
+    "$ACME" --issue --standalone -d "$DOMAIN" --keylength ec-256 \
+        --pre-hook "systemctl stop nginx 2>/dev/null || true" \
+        --post-hook "systemctl start nginx 2>/dev/null || true" \
+        || {
+            echo "[×] Не удалось выпустить сертификат. Проверьте DNS и доступность порта 80."
+            # Восстанавливаем nginx
+            systemctl start nginx 2>/dev/null || true
+            exit 1
+        }
 fi
 
 # --- Установка сертификатов ---
