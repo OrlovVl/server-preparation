@@ -30,7 +30,6 @@ cleanup() {
     systemctl stop nginx 2>/dev/null || true
     rm -f /etc/nginx/sites-enabled/filecloud 2>/dev/null || true
     rm -f /etc/nginx/sites-available/filecloud 2>/dev/null || true
-    rm -f /opt/remnanode/.profile 2>/dev/null || true
     echo "[✓] Очистка выполнена."
     exit 1
 }
@@ -256,11 +255,6 @@ add_mount_to_remnanode() {
 }
 
 add_mount_to_remnanode
-
-# --- Маркер профиля ---
-mkdir -p /opt/remnanode
-echo "nginx-acme" > /opt/remnanode/.profile
-echo "[✓] Маркер профиля создан: nginx-acme"
 
 # --- Вывод логов remnanode ---
 echo "[*] Просмотр логов контейнера remnanode (15 секунд)..."

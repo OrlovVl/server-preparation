@@ -32,7 +32,6 @@ print_header() {
     echo "                    МАСТЕР-СКРИПТ НАСТРОЙКИ СЕРВЕРА"
     echo "                       Активный профиль: $profile"
     echo "================================================================================"
-    local profile=$(get_active_profile)
     echo ""
 }
 
@@ -46,14 +45,14 @@ run_script() {
     if [ -z "$args" ]; then
         curl -fsSL --retry 5 --retry-delay 10 "$url" | bash || ret=$?
     else
-        eval "curl -fsSL --retry 5 --retry-delay 10 \"$url\" | bash -s -- $args" || ret=$?
+        curl -fsSL --retry 5 --retry-delay 10 "$url" | bash -s -- $args || ret=$?
     fi
     if [ $ret -eq 0 ]; then
         echo "[✓] Выполнение завершено успешно."
     else
         echo "[×] Ошибка при выполнении (код $ret). Проверьте логи."
     fi
-    return 0
+    return $ret
 }
 
 # --- Функции запроса параметров ---
@@ -95,14 +94,25 @@ full_setup_tcp() {
     echo "[*] Комплексная настройка: обновление + нода + TCP-оптимизация"
     local secret=$(ask_secret_key)
     local tcp_ports=$(ask_tcp_ports)
-    run_script "${SCRIPTS_BASE}/init-server.sh"
-    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"
+    run_script "${SCRIPTS_BASE}/init-server.sh" || {
+        echo "[×] Ошибка на этапе init-server.sh. Прерываем."
+        return 1
+    }
+    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret" || {
+        echo "[×] Ошибка на этапе setup-node.sh. Прерываем."
+        return 1
+    }
     if [ -n "$tcp_ports" ]; then
-        run_script "${SCRIPTS_BASE}/setup-tcp.sh" "--tcp-ports $tcp_ports"
+        run_script "${SCRIPTS_BASE}/setup-tcp.sh" "--tcp-ports $tcp_ports" || {
+            echo "[×] Ошибка на этапе setup-tcp.sh. Прерываем."
+            return 1
+        }
     else
-        run_script "${SCRIPTS_BASE}/setup-tcp.sh"
+        run_script "${SCRIPTS_BASE}/setup-tcp.sh" || {
+            echo "[×] Ошибка на этапе setup-tcp.sh. Прерываем."
+            return 1
+        }
     fi
-    # --- Создание маркера профиля ---
     mkdir -p /opt/remnanode
     echo "1. tcp" > /opt/remnanode/.profile
     echo ""
@@ -110,9 +120,10 @@ full_setup_tcp() {
     echo "Для отката используйте пункт меню 5."
     echo "Для удаления ноды используйте пункт 19."
     read -p "Нажмите Enter для продолжения..."
+    return 0
 }
 
-# 2. TCP-UDP (без заглушки)
+# 2. TCP/UDP (без заглушки)
 full_setup_tcp_udp() {
     echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация"
     local secret=$(ask_secret_key)
@@ -121,10 +132,18 @@ full_setup_tcp_udp() {
     local args=""
     [ -n "$tcp_ports" ] && args="$args --tcp-ports $tcp_ports"
     [ -n "$udp_ports" ] && args="$args --udp-ports $udp_ports"
-    run_script "${SCRIPTS_BASE}/init-server.sh"
-    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"
-    run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args"
-    # --- Создание маркера профиля ---
+    run_script "${SCRIPTS_BASE}/init-server.sh" || {
+        echo "[×] Ошибка на этапе init-server.sh. Прерываем."
+        return 1
+    }
+    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret" || {
+        echo "[×] Ошибка на этапе setup-node.sh. Прерываем."
+        return 1
+    }
+    run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args" || {
+        echo "[×] Ошибка на этапе setup-tcp-udp.sh. Прерываем."
+        return 1
+    }
     mkdir -p /opt/remnanode
     echo "2. tcp-udp" > /opt/remnanode/.profile
     echo ""
@@ -132,6 +151,7 @@ full_setup_tcp_udp() {
     echo "Для отката используйте пункт меню 6."
     echo "Для удаления ноды используйте пункт 19."
     read -p "Нажмите Enter для продолжения..."
+    return 0
 }
 
 # 3. TCP + Nginx + acme (заглушка)
@@ -141,15 +161,29 @@ full_setup_tcp_nginx() {
     local tcp_ports=$(ask_tcp_ports)
     local domain=$(ask_domain)
     local email=$(ask_email "$domain")
-    run_script "${SCRIPTS_BASE}/init-server.sh"
-    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"
+    run_script "${SCRIPTS_BASE}/init-server.sh" || {
+        echo "[×] Ошибка на этапе init-server.sh. Прерываем."
+        return 1
+    }
+    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret" || {
+        echo "[×] Ошибка на этапе setup-node.sh. Прерываем."
+        return 1
+    }
     if [ -n "$tcp_ports" ]; then
-        run_script "${SCRIPTS_BASE}/setup-tcp.sh" "--tcp-ports $tcp_ports"
+        run_script "${SCRIPTS_BASE}/setup-tcp.sh" "--tcp-ports $tcp_ports" || {
+            echo "[×] Ошибка на этапе setup-tcp.sh. Прерываем."
+            return 1
+        }
     else
-        run_script "${SCRIPTS_BASE}/setup-tcp.sh"
+        run_script "${SCRIPTS_BASE}/setup-tcp.sh" || {
+            echo "[×] Ошибка на этапе setup-tcp.sh. Прерываем."
+            return 1
+        }
     fi
-    run_script "${SCRIPTS_BASE}/setup-nginx-acme.sh" "--domain $domain --email $email"
-    # --- Создание маркера профиля ---
+    run_script "${SCRIPTS_BASE}/setup-nginx-acme-filecloud.sh" "--domain $domain --email $email" || {
+        echo "[×] Ошибка на этапе setup-nginx-acme-filecloud.sh. Прерываем."
+        return 1
+    }
     mkdir -p /opt/remnanode
     echo "3. tcp-nginx-cert" > /opt/remnanode/.profile
     echo ""
@@ -157,9 +191,10 @@ full_setup_tcp_nginx() {
     echo "Для отката используйте пункт меню 7."
     echo "Для удаления ноды используйте пункт 19."
     read -p "Нажмите Enter для продолжения..."
+    return 0
 }
 
-# 4. TCP-UDP + Nginx + acme (заглушка)
+# 4. TCP/UDP + Nginx + acme (заглушка)
 full_setup_tcp_udp_nginx() {
     echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация + Nginx + acme (заглушка)"
     local secret=$(ask_secret_key)
@@ -170,11 +205,22 @@ full_setup_tcp_udp_nginx() {
     local args=""
     [ -n "$tcp_ports" ] && args="$args --tcp-ports $tcp_ports"
     [ -n "$udp_ports" ] && args="$args --udp-ports $udp_ports"
-    run_script "${SCRIPTS_BASE}/init-server.sh"
-    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"
-    run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args"
-    run_script "${SCRIPTS_BASE}/setup-nginx-acme.sh" "--domain $domain --email $email"
-    # --- Создание маркера профиля ---
+    run_script "${SCRIPTS_BASE}/init-server.sh" || {
+        echo "[×] Ошибка на этапе init-server.sh. Прерываем."
+        return 1
+    }
+    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret" || {
+        echo "[×] Ошибка на этапе setup-node.sh. Прерываем."
+        return 1
+    }
+    run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args" || {
+        echo "[×] Ошибка на этапе setup-tcp-udp.sh. Прерываем."
+        return 1
+    }
+    run_script "${SCRIPTS_BASE}/setup-nginx-acme-filecloud.sh" "--domain $domain --email $email" || {
+        echo "[×] Ошибка на этапе setup-nginx-acme-filecloud.sh. Прерываем."
+        return 1
+    }
     mkdir -p /opt/remnanode
     echo "4. tcp-udp-nginx-cert" > /opt/remnanode/.profile
     echo ""
@@ -182,46 +228,69 @@ full_setup_tcp_udp_nginx() {
     echo "Для отката используйте пункт меню 8."
     echo "Для удаления ноды используйте пункт 19."
     read -p "Нажмите Enter для продолжения..."
+    return 0
 }
 
 # --- КОМПЛЕКСНЫЕ ОТКАТЫ (нода не удаляется) ---
 
 rollback_tcp() {
-    run_script "${ROLLBACK_BASE}/rollback-tcp.sh"
+    run_script "${ROLLBACK_BASE}/rollback-tcp.sh" || {
+        echo "[×] Ошибка при откате TCP. Прерываем."
+        return 1
+    }
     if [[ -f "/opt/remnanode/.profile" ]] && grep -q "1. tcp" "/opt/remnanode/.profile"; then
         rm -f "/opt/remnanode/.profile"
         echo "[✓] Маркер профиля удалён."
     fi
     read -p "Нажмите Enter для продолжения..."
+    return 0
 }
 
 rollback_tcp_udp() {
-    run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh"
+    run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh" || {
+        echo "[×] Ошибка при откате TCP/UDP. Прерываем."
+        return 1
+    }
     if [[ -f "/opt/remnanode/.profile" ]] && grep -q "2. tcp-udp" "/opt/remnanode/.profile"; then
         rm -f "/opt/remnanode/.profile"
         echo "[✓] Маркер профиля удалён."
     fi
     read -p "Нажмите Enter для продолжения..."
+    return 0
 }
 
 rollback_tcp_nginx() {
-    run_script "${ROLLBACK_BASE}/rollback-tcp.sh"
-    run_script "${ROLLBACK_BASE}/rollback-nginx.sh"
+    run_script "${ROLLBACK_BASE}/rollback-tcp.sh" || {
+        echo "[×] Ошибка при откате TCP (часть отката TCP+Nginx). Прерываем."
+        return 1
+    }
+    run_script "${ROLLBACK_BASE}/rollback-nginx-acme-filecloud.sh" || {
+        echo "[×] Ошибка при откате Nginx+acme (часть отката TCP+Nginx). Прерываем."
+        return 1
+    }
     if [[ -f "/opt/remnanode/.profile" ]] && grep -q "3. tcp-nginx-cert" "/opt/remnanode/.profile"; then
         rm -f "/opt/remnanode/.profile"
         echo "[✓] Маркер профиля удалён."
     fi
     read -p "Нажмите Enter для продолжения..."
+    return 0
 }
 
 rollback_tcp_udp_nginx() {
-    run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh"
-    run_script "${ROLLBACK_BASE}/rollback-nginx.sh"
+    run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh" || {
+        echo "[×] Ошибка при откате TCP/UDP (часть отката TCP/UDP+Nginx). Прерываем."
+        return 1
+    }
+    run_script "${ROLLBACK_BASE}/rollback-nginx-acme-filecloud.sh" || {
+        echo "[×] Ошибка при откате Nginx+acme (часть отката TCP/UDP+Nginx). Прерываем."
+        return 1
+    }
     if [[ -f "/opt/remnanode/.profile" ]] && grep -q "4. tcp-udp-nginx-cert" "/opt/remnanode/.profile"; then
         rm -f "/opt/remnanode/.profile"
         echo "[✓] Маркер профиля удалён."
     fi
     read -p "Нажмите Enter для продолжения..."
+    return 0
 }
 
 # --- ОСНОВНОЙ ЦИКЛ ---
@@ -271,17 +340,17 @@ while true; do
         6) rollback_tcp_udp ;;
         7) rollback_tcp_nginx ;;
         8) rollback_tcp_udp_nginx ;;
-        9) run_script "${SCRIPTS_BASE}/init-server.sh"; read -p "Нажмите Enter..." ;;
-        10) secret=$(ask_secret_key); run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret"; read -p "Нажмите Enter..." ;;
-        11) version=$(ask_kernel_version); run_script "${SCRIPTS_BASE}/setup-custom-kernel.sh" "--version $version"; read -p "Нажмите Enter..." ;;
-        12) tcp_ports=$(ask_tcp_ports); [ -n "$tcp_ports" ] && args="--tcp-ports $tcp_ports" || args=""; run_script "${SCRIPTS_BASE}/setup-tcp.sh" "$args"; read -p "Нажмите Enter..." ;;
-        13) tcp_ports=$(ask_tcp_ports); udp_ports=$(ask_udp_ports); args=""; [ -n "$tcp_ports" ] && args="$args --tcp-ports $tcp_ports"; [ -n "$udp_ports" ] && args="$args --udp-ports $udp_ports"; run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args"; read -p "Нажмите Enter..." ;;
-        14) domain=$(ask_domain); email=$(ask_email "$domain"); run_script "${SCRIPTS_BASE}/setup-nginx-acme.sh" "--domain $domain --email $email"; read -p "Нажмите Enter..." ;;
-        15) run_script "${ROLLBACK_BASE}/rollback-custom-kernel.sh"; read -p "Нажмите Enter..." ;;
-        16) run_script "${ROLLBACK_BASE}/rollback-tcp.sh"; read -p "Нажмите Enter..." ;;
-        17) run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh"; read -p "Нажмите Enter..." ;;
-        18) run_script "${ROLLBACK_BASE}/rollback-nginx.sh"; read -p "Нажмите Enter..." ;;
-        19) run_script "${ROLLBACK_BASE}/rollback-node.sh"; read -p "Нажмите Enter..." ;;
+        9) run_script "${SCRIPTS_BASE}/init-server.sh" || echo "[×] Ошибка при выполнении init-server.sh."; read -p "Нажмите Enter..." ;;
+        10) secret=$(ask_secret_key); run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret" || echo "[×] Ошибка при установке ноды."; read -p "Нажмите Enter..." ;;
+        11) version=$(ask_kernel_version); run_script "${SCRIPTS_BASE}/setup-custom-kernel.sh" "--version $version" || echo "[×] Ошибка при установке кастомного Xray-core."; read -p "Нажмите Enter..." ;;
+        12) tcp_ports=$(ask_tcp_ports); [ -n "$tcp_ports" ] && args="--tcp-ports $tcp_ports" || args=""; run_script "${SCRIPTS_BASE}/setup-tcp.sh" "$args" || echo "[×] Ошибка при настройке TCP."; read -p "Нажмите Enter..." ;;
+        13) tcp_ports=$(ask_tcp_ports); udp_ports=$(ask_udp_ports); args=""; [ -n "$tcp_ports" ] && args="$args --tcp-ports $tcp_ports"; [ -n "$udp_ports" ] && args="$args --udp-ports $udp_ports"; run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args" || echo "[×] Ошибка при настройке TCP/UDP."; read -p "Нажмите Enter..." ;;
+        14) domain=$(ask_domain); email=$(ask_email "$domain"); run_script "${SCRIPTS_BASE}/setup-nginx-acme-filecloud.sh" "--domain $domain --email $email" || echo "[×] Ошибка при настройке Nginx+acme."; read -p "Нажмите Enter..." ;;
+        15) run_script "${ROLLBACK_BASE}/rollback-custom-kernel.sh" || echo "[×] Ошибка при откате кастомного Xray-core."; read -p "Нажмите Enter..." ;;
+        16) run_script "${ROLLBACK_BASE}/rollback-tcp.sh" || echo "[×] Ошибка при откате TCP."; read -p "Нажмите Enter..." ;;
+        17) run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh" || echo "[×] Ошибка при откате TCP/UDP."; read -p "Нажмите Enter..." ;;
+        18) run_script "${ROLLBACK_BASE}/rollback-nginx-acme-filecloud.sh" || echo "[×] Ошибка при откате Nginx+acme."; read -p "Нажмите Enter..." ;;
+        19) run_script "${ROLLBACK_BASE}/rollback-node.sh" || echo "[×] Ошибка при откате ноды."; read -p "Нажмите Enter..." ;;
         20) echo "[*] Перезагрузка сервера..."; reboot ;;
         0) echo "[✓] Выход."; exit 0 ;;
         *) echo "[×] Неверный пункт."; read -p "Нажмите Enter..." ;;

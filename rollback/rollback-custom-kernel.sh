@@ -52,7 +52,7 @@ echo "[*] Удаляем монтирование из docker-compose.yml..."
 cp "$COMPOSE_FILE" "$COMPOSE_FILE.bak"
 sed -i "\|$MOUNT_LINE|d" "$COMPOSE_FILE"
 
-# --- Проверка и удаление пустой секции volumes (безопасно) ---
+# --- Проверка и удаление пустой секции volumes ---
 # Используем awk, чтобы удалить блок volumes, если в нём не осталось строк с "      - "
 awk '
 BEGIN { in_vol=0; block_start=0; lines=0; has_mount=0 }
