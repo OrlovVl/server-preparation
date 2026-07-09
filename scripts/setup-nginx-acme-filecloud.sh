@@ -157,6 +157,13 @@ mkdir -p "$CERT_DIR"
 chmod 600 "$CERT_DIR/key.pem"
 chmod 644 "$CERT_DIR/fullchain.pem"
 
+# --- Создание симлинков для постоянного доступа ---
+mkdir -p /etc/ssl/certs /etc/ssl/private
+ln -sf "$CERT_DIR/fullchain.pem" /etc/ssl/certs/noctua.crt
+ln -sf "$CERT_DIR/key.pem" /etc/ssl/private/noctua.key
+echo "[✓] Симлинки созданы: /etc/ssl/certs/noctua.crt -> $CERT_DIR/fullchain.pem"
+echo "[✓] Симлинки созданы: /etc/ssl/private/noctua.key -> $CERT_DIR/key.pem"
+
 # --- Установка FileCloud (заглушка) ---
 FILECLOUD_DIR="/opt/remnanode/filecloud"
 if [[ ! -d "$FILECLOUD_DIR" ]]; then
@@ -211,7 +218,7 @@ nginx -t || { echo "[×] Ошибка в конфигурации Nginx."; exit 
 systemctl enable nginx
 systemctl restart nginx
 
-# --- Монтирование сертификатов в контейнер remnanode (без симлинков) ---
+# --- Монтирование сертификатов в контейнер remnanode ---
 add_mount_to_remnanode() {
     local compose_file="/opt/remnanode/docker-compose.yml"
     if [[ ! -f "$compose_file" ]]; then
@@ -219,8 +226,8 @@ add_mount_to_remnanode() {
         return 1
     fi
     echo "[*] Проверяем монтирование сертификатов в remnanode..."
-    local mount_cert="      - $CERT_DIR/fullchain.pem:/etc/ssl/certs/noctua.crt:ro"
-    local mount_key="      - $CERT_DIR/key.pem:/etc/ssl/private/noctua.key:ro"
+    local mount_cert="      - /etc/ssl/certs/noctua.crt:/etc/ssl/certs/noctua.crt:ro"
+    local mount_key="      - /etc/ssl/private/noctua.key:/etc/ssl/private/noctua.key:ro"
 
     if grep -q "$mount_cert" "$compose_file" && grep -q "$mount_key" "$compose_file"; then
         echo "[✓] Монтирование сертификатов уже присутствует в remnanode."
