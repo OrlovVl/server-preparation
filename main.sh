@@ -90,15 +90,13 @@ ask_email() {
 # --- Настройка отправки логов в Telegram ---
 setup_telegram_logs() {
     echo "[*] Настройка отправки логов в Telegram"
-    local bot_token chat_id send_time prefix
+    local bot_token chat_id prefix
     read -p "Введите Telegram Bot Token: " bot_token
     read -p "Введите Chat ID: " chat_id
-    read -p "Введите время отправки (HH:MM, по умолчанию 00:00): " send_time
-    [[ -z "$send_time" ]] && send_time="00:00"
     read -p "Введите префикс для логов (оставьте пустым для имени хоста): " prefix
     [[ -z "$prefix" ]] && prefix=$(hostname)
     
-    local args="--token $bot_token --chat-id $chat_id --time $send_time --prefix $prefix"
+    local args="--token $bot_token --chat-id $chat_id --prefix $prefix"
     run_script "${SCRIPTS_BASE}/setup-telegram-logs.sh" "$args" || {
         echo "[×] Ошибка при настройке отправки логов."
         return 1
@@ -360,7 +358,7 @@ while true; do
     echo " 12. Настройка TCP-оптимизации (с доп. портами)"
     echo " 13. Настройка TCP/UDP-оптимизации (с доп. портами)"
     echo " 14. Настройка Nginx + acme (заглушка)"
-    echo " 15. Настройка отправки логов Xray в Telegram (ежедневно)"
+    echo " 15. Настройка отправки логов Xray в Telegram (при 46 МБ, проверка каждые 2 мин)"
     echo " 16. Отправить логи сейчас (без очистки)"
     echo ""
     echo "  === ОТДЕЛЬНЫЕ ОТКАТЫ ==="
