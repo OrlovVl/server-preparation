@@ -87,11 +87,46 @@ ask_email() {
     [[ -z "$email" ]] && echo "admin@$domain" || echo "$email"
 }
 
+# --- Настройка отправки логов в Telegram ---
+setup_telegram_logs() {
+    echo "[*] Настройка отправки логов в Telegram"
+    local bot_token chat_id send_time prefix
+    read -p "Введите Telegram Bot Token: " bot_token
+    read -p "Введите Chat ID: " chat_id
+    read -p "Введите время отправки (HH:MM, по умолчанию 00:00): " send_time
+    [[ -z "$send_time" ]] && send_time="00:00"
+    read -p "Введите префикс для логов (оставьте пустым для имени хоста): " prefix
+    [[ -z "$prefix" ]] && prefix=$(hostname)
+    
+    local args="--token $bot_token --chat-id $chat_id --time $send_time --prefix $prefix"
+    run_script "${SCRIPTS_BASE}/setup-telegram-logs.sh" "$args" || {
+        echo "[×] Ошибка при настройке отправки логов."
+        return 1
+    }
+    return 0
+}
+
+rollback_telegram_logs() {
+    run_script "${ROLLBACK_BASE}/rollback-telegram-logs.sh" || {
+        echo "[×] Ошибка при откате отправки логов."
+        return 1
+    }
+    return 0
+}
+
+send_logs_now() {
+    if [[ -x "/usr/local/bin/send-xray-logs-now.sh" ]]; then
+        /usr/local/bin/send-xray-logs-now.sh
+    else
+        echo "[!] Скрипт отправки логов не найден. Сначала выполните настройку (пункт 15)."
+    fi
+}
+
 # --- КОМПЛЕКСНЫЕ НАСТРОЙКИ ---
 
 # 1. TCP (без заглушки)
 full_setup_tcp() {
-    echo "[*] Комплексная настройка: обновление + нода + TCP-оптимизация"
+    echo "[*] Комплексная настройка: обновление + нода + TCP-оптимизация + логи"
     local secret=$(ask_secret_key)
     local tcp_ports=$(ask_tcp_ports)
     run_script "${SCRIPTS_BASE}/init-server.sh" || {
@@ -113,6 +148,7 @@ full_setup_tcp() {
             return 1
         }
     fi
+    setup_telegram_logs || return 1
     mkdir -p /opt/remnanode
     echo "1. tcp" > /opt/remnanode/.profile
     echo ""
@@ -125,7 +161,7 @@ full_setup_tcp() {
 
 # 2. TCP/UDP (без заглушки)
 full_setup_tcp_udp() {
-    echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация"
+    echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация + логи"
     local secret=$(ask_secret_key)
     local tcp_ports=$(ask_tcp_ports)
     local udp_ports=$(ask_udp_ports)
@@ -144,6 +180,7 @@ full_setup_tcp_udp() {
         echo "[×] Ошибка на этапе setup-tcp-udp.sh. Прерываем."
         return 1
     }
+    setup_telegram_logs || return 1
     mkdir -p /opt/remnanode
     echo "2. tcp-udp" > /opt/remnanode/.profile
     echo ""
@@ -156,7 +193,7 @@ full_setup_tcp_udp() {
 
 # 3. TCP + Nginx + acme (заглушка)
 full_setup_tcp_nginx() {
-    echo "[*] Комплексная настройка: обновление + нода + TCP-оптимизация + Nginx + acme (заглушка)"
+    echo "[*] Комплексная настройка: обновление + нода + TCP-оптимизация + Nginx + acme + заглушка + логи"
     local secret=$(ask_secret_key)
     local tcp_ports=$(ask_tcp_ports)
     local domain=$(ask_domain)
@@ -184,6 +221,7 @@ full_setup_tcp_nginx() {
         echo "[×] Ошибка на этапе setup-nginx-acme-filecloud.sh. Прерываем."
         return 1
     }
+    setup_telegram_logs || return 1
     mkdir -p /opt/remnanode
     echo "3. tcp-nginx-cert" > /opt/remnanode/.profile
     echo ""
@@ -196,7 +234,7 @@ full_setup_tcp_nginx() {
 
 # 4. TCP/UDP + Nginx + acme (заглушка)
 full_setup_tcp_udp_nginx() {
-    echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация + Nginx + acme (заглушка)"
+    echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация + Nginx + acme + заглушка + логи"
     local secret=$(ask_secret_key)
     local tcp_ports=$(ask_tcp_ports)
     local udp_ports=$(ask_udp_ports)
@@ -221,6 +259,7 @@ full_setup_tcp_udp_nginx() {
         echo "[×] Ошибка на этапе setup-nginx-acme-filecloud.sh. Прерываем."
         return 1
     }
+    setup_telegram_logs || return 1
     mkdir -p /opt/remnanode
     echo "4. tcp-udp-nginx-cert" > /opt/remnanode/.profile
     echo ""
@@ -234,10 +273,11 @@ full_setup_tcp_udp_nginx() {
 # --- КОМПЛЕКСНЫЕ ОТКАТЫ (нода не удаляется) ---
 
 rollback_tcp() {
-    run_script "${ROLLBACK_BASE}/rollback-tcp.sh" || {
+    run_script "${ROLLBACK_BASE}/rollback-tcp.sh" || { 
         echo "[×] Ошибка при откате TCP. Прерываем."
         return 1
     }
+    rollback_telegram_logs || echo "[!] Ошибка при откате логов."
     if [[ -f "/opt/remnanode/.profile" ]] && grep -q "1. tcp" "/opt/remnanode/.profile"; then
         rm -f "/opt/remnanode/.profile"
         echo "[✓] Маркер профиля удалён."
@@ -251,6 +291,7 @@ rollback_tcp_udp() {
         echo "[×] Ошибка при откате TCP/UDP. Прерываем."
         return 1
     }
+    rollback_telegram_logs || echo "[!] Ошибка при откате логов."
     if [[ -f "/opt/remnanode/.profile" ]] && grep -q "2. tcp-udp" "/opt/remnanode/.profile"; then
         rm -f "/opt/remnanode/.profile"
         echo "[✓] Маркер профиля удалён."
@@ -268,6 +309,7 @@ rollback_tcp_nginx() {
         echo "[×] Ошибка при откате Nginx+acme (часть отката TCP+Nginx). Прерываем."
         return 1
     }
+    rollback_telegram_logs || echo "[!] Ошибка при откате логов."
     if [[ -f "/opt/remnanode/.profile" ]] && grep -q "3. tcp-nginx-cert" "/opt/remnanode/.profile"; then
         rm -f "/opt/remnanode/.profile"
         echo "[✓] Маркер профиля удалён."
@@ -285,6 +327,7 @@ rollback_tcp_udp_nginx() {
         echo "[×] Ошибка при откате Nginx+acme (часть отката TCP/UDP+Nginx). Прерываем."
         return 1
     }
+    rollback_telegram_logs || echo "[!] Ошибка при откате логов."
     if [[ -f "/opt/remnanode/.profile" ]] && grep -q "4. tcp-udp-nginx-cert" "/opt/remnanode/.profile"; then
         rm -f "/opt/remnanode/.profile"
         echo "[✓] Маркер профиля удалён."
@@ -299,16 +342,16 @@ while true; do
     echo "Выберите действие:"
     echo ""
     echo "  === КОМПЛЕКСНЫЕ НАСТРОЙКИ ==="
-    echo "  1. TCP (обновление + нода + TCP-оптимизация)"
-    echo "  2. TCP/UDP (обновление + нода + TCP/UDP-оптимизация)"
-    echo "  3. TCP + Nginx + acme (заглушка)"
-    echo "  4. TCP/UDP + Nginx + acme (заглушка)"
+    echo "  1. TCP (обновление + нода + TCP-оптимизация + логи)"
+    echo "  2. TCP/UDP (обновление + нода + TCP/UDP-оптимизация + логи)"
+    echo "  3. TCP + Nginx + acme + заглушка + логи"
+    echo "  4. TCP/UDP + Nginx + acme + заглушка + логи"
     echo ""
     echo "  === КОМПЛЕКСНЫЕ ОТКАТЫ (нода не удаляется) ==="
-    echo "  5. Откат TCP"
-    echo "  6. Откат TCP/UDP"
-    echo "  7. Откат TCP + Nginx"
-    echo "  8. Откат TCP/UDP + Nginx"
+    echo "  5. Откат TCP + логи"
+    echo "  6. Откат TCP/UDP + логи"
+    echo "  7. Откат TCP + Nginx + логи"
+    echo "  8. Откат TCP/UDP + Nginx + логи"
     echo ""
     echo "  === ОТДЕЛЬНЫЕ ДЕЙСТВИЯ (УСТАНОВКА/НАСТРОЙКА) ==="
     echo "  9. Базовая подготовка сервера (обновление + Docker)"
@@ -317,16 +360,19 @@ while true; do
     echo " 12. Настройка TCP-оптимизации (с доп. портами)"
     echo " 13. Настройка TCP/UDP-оптимизации (с доп. портами)"
     echo " 14. Настройка Nginx + acme (заглушка)"
+    echo " 15. Настройка отправки логов Xray в Telegram (ежедневно)"
+    echo " 16. Отправить логи сейчас (без очистки)"
     echo ""
     echo "  === ОТДЕЛЬНЫЕ ОТКАТЫ ==="
-    echo " 15. Откат кастомного Xray-core"
-    echo " 16. Откат TCP-оптимизации"
-    echo " 17. Откат TCP/UDP-оптимизации"
-    echo " 18. Откат Nginx + acme (заглушка)"
-    echo " 19. Откат ноды (удаление контейнера и файлов)"
+    echo " 17. Откат кастомного Xray-core"
+    echo " 18. Откат TCP-оптимизации"
+    echo " 19. Откат TCP/UDP-оптимизации"
+    echo " 20. Откат Nginx + acme (заглушка)"
+    echo " 21. Откат отправки логов"
+    echo " 22. Откат ноды (удаление контейнера и файлов)"
     echo ""
     echo "  === СИСТЕМНЫЕ ==="
-    echo " 20. Перезагрузка сервера"
+    echo " 23. Перезагрузка сервера"
     echo "  0. Выход"
     echo ""
     read -p "Введите номер пункта: " choice
@@ -346,12 +392,15 @@ while true; do
         12) tcp_ports=$(ask_tcp_ports); [ -n "$tcp_ports" ] && args="--tcp-ports $tcp_ports" || args=""; run_script "${SCRIPTS_BASE}/setup-tcp.sh" "$args" || echo "[×] Ошибка при настройке TCP."; read -p "Нажмите Enter..." ;;
         13) tcp_ports=$(ask_tcp_ports); udp_ports=$(ask_udp_ports); args=""; [ -n "$tcp_ports" ] && args="$args --tcp-ports $tcp_ports"; [ -n "$udp_ports" ] && args="$args --udp-ports $udp_ports"; run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args" || echo "[×] Ошибка при настройке TCP/UDP."; read -p "Нажмите Enter..." ;;
         14) domain=$(ask_domain); email=$(ask_email "$domain"); run_script "${SCRIPTS_BASE}/setup-nginx-acme-filecloud.sh" "--domain $domain --email $email" || echo "[×] Ошибка при настройке Nginx+acme."; read -p "Нажмите Enter..." ;;
-        15) run_script "${ROLLBACK_BASE}/rollback-custom-kernel.sh" || echo "[×] Ошибка при откате кастомного Xray-core."; read -p "Нажмите Enter..." ;;
-        16) run_script "${ROLLBACK_BASE}/rollback-tcp.sh" || echo "[×] Ошибка при откате TCP."; read -p "Нажмите Enter..." ;;
-        17) run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh" || echo "[×] Ошибка при откате TCP/UDP."; read -p "Нажмите Enter..." ;;
-        18) run_script "${ROLLBACK_BASE}/rollback-nginx-acme-filecloud.sh" || echo "[×] Ошибка при откате Nginx+acme."; read -p "Нажмите Enter..." ;;
-        19) run_script "${ROLLBACK_BASE}/rollback-node.sh" || echo "[×] Ошибка при откате ноды."; read -p "Нажмите Enter..." ;;
-        20) echo "[*] Перезагрузка сервера..."; reboot ;;
+        15) setup_telegram_logs; read -p "Нажмите Enter..." ;;
+        16) send_logs_now; read -p "Нажмите Enter..." ;;
+        17) run_script "${ROLLBACK_BASE}/rollback-custom-kernel.sh" || echo "[×] Ошибка при откате кастомного Xray-core."; read -p "Нажмите Enter..." ;;
+        18) run_script "${ROLLBACK_BASE}/rollback-tcp.sh" || echo "[×] Ошибка при откате TCP."; read -p "Нажмите Enter..." ;;
+        19) run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh" || echo "[×] Ошибка при откате TCP/UDP."; read -p "Нажмите Enter..." ;;
+        20) run_script "${ROLLBACK_BASE}/rollback-nginx-acme-filecloud.sh" || echo "[×] Ошибка при откате Nginx+acme."; read -p "Нажмите Enter..." ;;
+        21) rollback_telegram_logs; read -p "Нажмите Enter..." ;;
+        22) run_script "${ROLLBACK_BASE}/rollback-node.sh" || echo "[×] Ошибка при откате ноды."; read -p "Нажмите Enter..." ;;
+        23) echo "[*] Перезагрузка сервера..."; reboot ;;
         0) echo "[✓] Выход."; exit 0 ;;
         *) echo "[×] Неверный пункт."; read -p "Нажмите Enter..." ;;
     esac
