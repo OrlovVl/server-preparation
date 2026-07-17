@@ -112,21 +112,38 @@ if command -v ufw &> /dev/null; then
     fi
 fi
 
-if "$ACME" --list 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$DOMAIN"; then
-    echo "[✓] Сертификат уже существует, пропускаем issue."
+CERT_DOMAIN="$DOMAIN"
+CERT_DIR_ACME="/root/.acme.sh/${CERT_DOMAIN}_ecc"
+NEED_ISSUE=false
+
+# Проверяем, существует ли домен в списке acme.sh
+if "$ACME" --list 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$CERT_DOMAIN"; then
+    # Проверяем наличие файлов сертификата
+    if [[ -f "$CERT_DIR_ACME/${CERT_DOMAIN}.key" && -f "$CERT_DIR_ACME/fullchain.cer" ]]; then
+        echo "[✓] Сертификат уже существует, пропускаем issue."
+    else
+        echo "[!] Сертификат найден в списке, но файлы отсутствуют. Перевыпускаем..."
+        "$ACME" --remove -d "$CERT_DOMAIN" 2>/dev/null || true
+        NEED_ISSUE=true
+    fi
 else
-    # Останавливаем nginx перед выпуском (освобождаем порт 80)
-    # pre-hook и post-hook также будут использоваться при автоматическом обновлении через cron
-    "$ACME" --issue --standalone -d "$DOMAIN" --keylength ec-256 \
+    NEED_ISSUE=true
+fi
+
+if [[ "$NEED_ISSUE" == true ]]; then
+    # Останавливаем nginx перед выпуском (если он запущен)
+    systemctl stop nginx 2>/dev/null || true
+    echo "[*] Выпускаем сертификат (standalone)..."
+    "$ACME" --issue --standalone -d "$CERT_DOMAIN" --keylength ec-256 \
         --pre-hook "systemctl stop nginx 2>/dev/null || true" \
-        --post-hook "systemctl start nginx 2>/dev/null || true" \
-        || {
+        --post-hook "systemctl start nginx 2>/dev/null || true" || {
             echo "[×] Не удалось выпустить сертификат. Проверьте DNS и доступность порта 80."
-            # Восстанавливаем nginx
             systemctl start nginx 2>/dev/null || true
             exit 1
         }
-fi
+    systemctl start nginx 2>/dev/null || true
+    echo "[✓] Сертификат успешно выпущен."
+fi 
 
 # --- Установка сертификатов ---
 CERT_DIR="/etc/node-certs/$DOMAIN"
@@ -139,6 +156,13 @@ mkdir -p "$CERT_DIR"
 
 chmod 600 "$CERT_DIR/key.pem"
 chmod 644 "$CERT_DIR/fullchain.pem"
+
+# --- Создание симлинков для постоянного доступа ---
+mkdir -p /etc/ssl/certs /etc/ssl/private
+ln -sf "$CERT_DIR/fullchain.pem" /etc/ssl/certs/noctua.crt
+ln -sf "$CERT_DIR/key.pem" /etc/ssl/private/noctua.key
+echo "[✓] Симлинки созданы: /etc/ssl/certs/noctua.crt -> $CERT_DIR/fullchain.pem"
+echo "[✓] Симлинки созданы: /etc/ssl/private/noctua.key -> $CERT_DIR/key.pem"
 
 # --- Установка FileCloud (заглушка) ---
 FILECLOUD_DIR="/opt/remnanode/filecloud"
@@ -194,7 +218,7 @@ nginx -t || { echo "[×] Ошибка в конфигурации Nginx."; exit 
 systemctl enable nginx
 systemctl restart nginx
 
-# --- Монтирование сертификатов в контейнер remnanode (без симлинков) ---
+# --- Монтирование сертификатов в контейнер remnanode ---
 add_mount_to_remnanode() {
     local compose_file="/opt/remnanode/docker-compose.yml"
     if [[ ! -f "$compose_file" ]]; then
@@ -202,8 +226,8 @@ add_mount_to_remnanode() {
         return 1
     fi
     echo "[*] Проверяем монтирование сертификатов в remnanode..."
-    local mount_cert="      - $CERT_DIR/fullchain.pem:/etc/ssl/certs/noctua.crt:ro"
-    local mount_key="      - $CERT_DIR/key.pem:/etc/ssl/private/noctua.key:ro"
+    local mount_cert="      - /etc/ssl/certs/noctua.crt:/etc/ssl/certs/noctua.crt:ro"
+    local mount_key="      - /etc/ssl/private/noctua.key:/etc/ssl/private/noctua.key:ro"
 
     if grep -q "$mount_cert" "$compose_file" && grep -q "$mount_key" "$compose_file"; then
         echo "[✓] Монтирование сертификатов уже присутствует в remnanode."
@@ -271,8 +295,11 @@ echo "[*] Продолжаем выполнение..."
 echo ""
 echo "[✓] Настройка Nginx + acme + FileCloud завершена."
 echo "[*] Сертификаты: $CERT_DIR"
+echo "[*] Симлинки:"
+echo "    /etc/ssl/certs/noctua.crt -> $CERT_DIR/fullchain.pem"
+echo "    /etc/ssl/private/noctua.key -> $CERT_DIR/key.pem"
 echo "[*] Заглушка доступна локально: https://127.0.0.1:$FALLBACK_PORT"
 echo "[*] Логин: $WEB_USER, пароль: $WEB_PASSWORD"
 echo "[*] Конфиг Nginx: /etc/nginx/sites-available/filecloud"
-echo "[*] Сертификаты смонтированы в контейнер remnanode (если он есть)."
+echo "[*] Сертификаты смонтированы в контейнер remnanode через симлинки (если он есть)."
 exit 0

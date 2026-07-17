@@ -59,35 +59,49 @@ if [[ -d "/etc/remna-certs" ]]; then
     echo "[✓] Сертификаты удалены (/etc/remna-certs)."
 fi
 
-# --- 6. Удаляем монтирование сертификатов из docker-compose.yml ---
+# --- 6. Удаление симлинков сертификатов ---
+if [[ -L "/etc/ssl/certs/noctua.crt" ]]; then
+    rm -f /etc/ssl/certs/noctua.crt
+    echo "[✓] Симлинк /etc/ssl/certs/noctua.crt удалён."
+fi
+if [[ -L "/etc/ssl/private/noctua.key" ]]; then
+    rm -f /etc/ssl/private/noctua.key
+    echo "[✓] Симлинк /etc/ssl/private/noctua.key удалён."
+fi
+
+# --- 7. Удаляем монтирование сертификатов из docker-compose.yml ---
 COMPOSE_FILE="/opt/remnanode/docker-compose.yml"
 if [[ -f "$COMPOSE_FILE" ]]; then
     echo "[*] Проверяем монтирование сертификатов в remnanode..."
     if grep -q "/etc/ssl/certs/noctua.crt" "$COMPOSE_FILE" || grep -q "/etc/ssl/private/noctua.key" "$COMPOSE_FILE"; then
         cp "$COMPOSE_FILE" "$COMPOSE_FILE.bak"
-        # Удаляем строки монтирования (они содержат пути к сертификатам)
+        echo "[*] Удаляем строки монтирования..."
         sed -i "\|/etc/ssl/certs/noctua.crt|d" "$COMPOSE_FILE"
         sed -i "\|/etc/ssl/private/noctua.key|d" "$COMPOSE_FILE"
-        # Если секция volumes стала пустой, удаляем её
-        # Проверяем, есть ли ещё строки с "      - " внутри volumes
+        echo "[✓] Строки монтирования удалены."
+
+        # Проверяем, пуста ли секция volumes
         if grep -q "^    volumes:" "$COMPOSE_FILE"; then
-            # Проверяем, что после volumes нет строк с "      - " (кроме пустых)
+            # Проверяем наличие других монтирований в секции
             if ! awk '/^    volumes:/,/^  / { if ($0 ~ /^      - /) found=1 } END { exit !found }' "$COMPOSE_FILE"; then
-                # Если не найдено ни одного монтирования, удаляем блок volumes целиком
                 sed -i '/^    volumes:/,/^  /d' "$COMPOSE_FILE"
-                echo "[✓] Пустая секция volumes удалена."
+                echo "[✓] Секция volumes была пустой и удалена."
+            else
+                echo "[✓] Секция volumes содержит другие монтирования, не удаляем."
             fi
         fi
-        # Проверяем синтаксис
+
+        # Проверяем синтаксис compose-файла
         if ! $DOCKER_COMPOSE -f "$COMPOSE_FILE" config >/dev/null 2>&1; then
             echo "[!] Ошибка в $COMPOSE_FILE после удаления монтирования. Восстанавливаем бэкап..."
             mv "$COMPOSE_FILE.bak" "$COMPOSE_FILE"
         else
             rm -f "$COMPOSE_FILE.bak"
-            echo "[✓] Монтирование сертификатов удалено."
-            # --- Перезапуск remnanode (только если контейнер существует) ---
+            echo "[✓] Монтирование сертификатов полностью удалено."
+
+            # Перезапускаем remnanode, только если контейнер существует
             if docker ps -a --format '{{.Names}}' | grep -q "^remnanode$"; then
-                echo "[*] Перезапускаем remnanode..."
+                echo "[*] Перезапускаем remnanode для применения изменений..."
                 $DOCKER_COMPOSE -f "$COMPOSE_FILE" down
                 $DOCKER_COMPOSE -f "$COMPOSE_FILE" up -d
             else
