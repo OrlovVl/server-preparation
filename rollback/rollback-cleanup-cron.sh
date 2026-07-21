@@ -10,7 +10,8 @@ fi
 echo "[*] Откат очистки системы (cron)..."
 
 CLEANUP_SCRIPT="/usr/local/bin/cleanup-system.sh"
-if crontab -l 2>/dev/null | grep -q "$CLEANUP_SCRIPT"; then
+
+if crontab -l 2>/dev/null || true | grep -q "$CLEANUP_SCRIPT"; then
     crontab -l 2>/dev/null | grep -v "$CLEANUP_SCRIPT" | crontab -
     echo "[✓] Cron-задание удалено."
 else
