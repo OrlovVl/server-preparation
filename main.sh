@@ -264,10 +264,17 @@ full_setup_tcp_udp_nginx() {
 }
 
 # --- КОМПЛЕКСНЫЕ ОТКАТЫ (нода не удаляется) ---
-
 rollback_tcp() {
     run_script "${ROLLBACK_BASE}/rollback-tcp.sh" || {
         echo "[×] Ошибка при откате TCP. Прерываем."
+        return 1
+    }
+    run_script "${ROLLBACK_BASE}/rollback-log-rotation.sh" || {
+        echo "[×] Ошибка при откате ротации логов."
+        return 1
+    }
+    run_script "${ROLLBACK_BASE}/rollback-cleanup-cron.sh" || {
+        echo "[×] Ошибка при откате cron-очистки."
         return 1
     }
     if [[ -f "/opt/remnanode/.profile" ]] && grep -q "1. tcp" "/opt/remnanode/.profile"; then
@@ -281,6 +288,14 @@ rollback_tcp() {
 rollback_tcp_udp() {
     run_script "${ROLLBACK_BASE}/rollback-tcp-udp.sh" || {
         echo "[×] Ошибка при откате TCP/UDP. Прерываем."
+        return 1
+    }
+    run_script "${ROLLBACK_BASE}/rollback-log-rotation.sh" || {
+        echo "[×] Ошибка при откате ротации логов."
+        return 1
+    }
+    run_script "${ROLLBACK_BASE}/rollback-cleanup-cron.sh" || {
+        echo "[×] Ошибка при откате cron-очистки."
         return 1
     }
     if [[ -f "/opt/remnanode/.profile" ]] && grep -q "2. tcp-udp" "/opt/remnanode/.profile"; then
@@ -300,6 +315,14 @@ rollback_tcp_nginx() {
         echo "[×] Ошибка при откате Nginx+acme (часть отката TCP+Nginx). Прерываем."
         return 1
     }
+    run_script "${ROLLBACK_BASE}/rollback-log-rotation.sh" || {
+        echo "[×] Ошибка при откате ротации логов."
+        return 1
+    }
+    run_script "${ROLLBACK_BASE}/rollback-cleanup-cron.sh" || {
+        echo "[×] Ошибка при откате cron-очистки."
+        return 1
+    }
     if [[ -f "/opt/remnanode/.profile" ]] && grep -q "3. tcp-nginx-cert" "/opt/remnanode/.profile"; then
         rm -f "/opt/remnanode/.profile"
         echo "[✓] Маркер профиля удалён."
@@ -317,6 +340,14 @@ rollback_tcp_udp_nginx() {
         echo "[×] Ошибка при откате Nginx+acme (часть отката TCP/UDP+Nginx). Прерываем."
         return 1
     }
+    run_script "${ROLLBACK_BASE}/rollback-log-rotation.sh" || {
+        echo "[×] Ошибка при откате ротации логов."
+        return 1
+    }
+    run_script "${ROLLBACK_BASE}/rollback-cleanup-cron.sh" || {
+        echo "[×] Ошибка при откате cron-очистки."
+        return 1
+    }
     if [[ -f "/opt/remnanode/.profile" ]] && grep -q "4. tcp-udp-nginx-cert" "/opt/remnanode/.profile"; then
         rm -f "/opt/remnanode/.profile"
         echo "[✓] Маркер профиля удалён."
@@ -331,10 +362,10 @@ while true; do
     echo "Выберите действие:"
     echo ""
     echo "  === КОМПЛЕКСНЫЕ НАСТРОЙКИ ==="
-    echo "  1. TCP (обновление + нода + TCP-оптимизация)"
-    echo "  2. TCP/UDP (обновление + нода + TCP/UDP-оптимизация)"
-    echo "  3. TCP + Nginx + acme (заглушка)"
-    echo "  4. TCP/UDP + Nginx + acme (заглушка)"
+    echo "  1. TCP (обновление + нода + TCP-оптимизация + ротация логов + очистка)"
+    echo "  2. TCP/UDP (обновление + нода + TCP/UDP-оптимизация + ротация логов + очистка)"
+    echo "  3. TCP (обновление + нода + TCP-оптимизация + ротация логов + очистка) + Nginx + acme (заглушка)"
+    echo "  4. TCP/UDP (обновление + нода + TCP/UDP-оптимизация + ротация логов + очистка) + Nginx + acme (заглушка)"
     echo ""
     echo "  === КОМПЛЕКСНЫЕ ОТКАТЫ (нода не удаляется) ==="
     echo "  5. Откат TCP"
