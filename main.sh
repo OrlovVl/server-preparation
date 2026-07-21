@@ -91,7 +91,7 @@ ask_email() {
 
 # 1. TCP (без заглушки)
 full_setup_tcp() {
-    echo "[*] Комплексная настройка: обновление + нода + TCP-оптимизация"
+    echo "[*] Комплексная настройка: обновление + нода + TCP-оптимизация + ротация логов + очистка"
     local secret=$(ask_secret_key)
     local tcp_ports=$(ask_tcp_ports)
     run_script "${SCRIPTS_BASE}/init-server.sh" || {
@@ -113,6 +113,14 @@ full_setup_tcp() {
             return 1
         }
     fi
+    run_script "${SCRIPTS_BASE}/setup-log-rotation.sh" || {
+        echo "[×] Ошибка при настройке ротации логов."
+        return 1
+    }
+    run_script "${SCRIPTS_BASE}/setup-cleanup-cron.sh" || {
+        echo "[×] Ошибка при настройке cron-очистки."
+        return 1
+    }
     mkdir -p /opt/remnanode
     echo "1. tcp" > /opt/remnanode/.profile
     echo ""
@@ -125,7 +133,7 @@ full_setup_tcp() {
 
 # 2. TCP/UDP (без заглушки)
 full_setup_tcp_udp() {
-    echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация"
+    echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация + ротация логов + очистка"
     local secret=$(ask_secret_key)
     local tcp_ports=$(ask_tcp_ports)
     local udp_ports=$(ask_udp_ports)
@@ -142,6 +150,14 @@ full_setup_tcp_udp() {
     }
     run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args" || {
         echo "[×] Ошибка на этапе setup-tcp-udp.sh. Прерываем."
+        return 1
+    }
+    run_script "${SCRIPTS_BASE}/setup-log-rotation.sh" || {
+        echo "[×] Ошибка при настройке ротации логов."
+        return 1
+    }
+    run_script "${SCRIPTS_BASE}/setup-cleanup-cron.sh" || {
+        echo "[×] Ошибка при настройке cron-очистки."
         return 1
     }
     mkdir -p /opt/remnanode
@@ -156,7 +172,7 @@ full_setup_tcp_udp() {
 
 # 3. TCP + Nginx + acme (заглушка)
 full_setup_tcp_nginx() {
-    echo "[*] Комплексная настройка: обновление + нода + TCP-оптимизация + Nginx + acme (заглушка)"
+    echo "[*] Комплексная настройка: обновление + нода + TCP-оптимизация + Nginx + acme + ротация логов + очистка"
     local secret=$(ask_secret_key)
     local tcp_ports=$(ask_tcp_ports)
     local domain=$(ask_domain)
@@ -184,6 +200,14 @@ full_setup_tcp_nginx() {
         echo "[×] Ошибка на этапе setup-nginx-acme-filecloud.sh. Прерываем."
         return 1
     }
+    run_script "${SCRIPTS_BASE}/setup-log-rotation.sh" || {
+        echo "[×] Ошибка при настройке ротации логов."
+        return 1
+    }
+    run_script "${SCRIPTS_BASE}/setup-cleanup-cron.sh" || {
+        echo "[×] Ошибка при настройке cron-очистки."
+        return 1
+    }
     mkdir -p /opt/remnanode
     echo "3. tcp-nginx-cert" > /opt/remnanode/.profile
     echo ""
@@ -196,7 +220,7 @@ full_setup_tcp_nginx() {
 
 # 4. TCP/UDP + Nginx + acme (заглушка)
 full_setup_tcp_udp_nginx() {
-    echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация + Nginx + acme (заглушка)"
+    echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация + Nginx + acme + ротация логов + очистка"
     local secret=$(ask_secret_key)
     local tcp_ports=$(ask_tcp_ports)
     local udp_ports=$(ask_udp_ports)
@@ -219,6 +243,14 @@ full_setup_tcp_udp_nginx() {
     }
     run_script "${SCRIPTS_BASE}/setup-nginx-acme-filecloud.sh" "--domain $domain --email $email" || {
         echo "[×] Ошибка на этапе setup-nginx-acme-filecloud.sh. Прерываем."
+        return 1
+    }
+    run_script "${SCRIPTS_BASE}/setup-log-rotation.sh" || {
+        echo "[×] Ошибка при настройке ротации логов."
+        return 1
+    }
+    run_script "${SCRIPTS_BASE}/setup-cleanup-cron.sh" || {
+        echo "[×] Ошибка при настройке cron-очистки."
         return 1
     }
     mkdir -p /opt/remnanode
