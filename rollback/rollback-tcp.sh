@@ -78,11 +78,6 @@ fi
 
 sysctl -p /etc/sysctl.conf
 
-if [ -f "$ACTIVE_FILE" ] && [ "$(cat "$ACTIVE_FILE")" = "tcp" ]; then
-  rm -f "$ACTIVE_FILE"
-  echo "[✓] Маркер активного профиля удалён."
-fi
-
 rm -rf "$BACKUP_DIR"
 echo "[✓] Бэкапы удалены."
 
