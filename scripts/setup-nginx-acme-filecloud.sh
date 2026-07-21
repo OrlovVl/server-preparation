@@ -94,6 +94,20 @@ for pkg in nginx curl socat apache2-utils openssl wget unzip; do
     fi
 done
 
+# --- Установка yq ---
+if ! command -v yq &> /dev/null; then
+    echo "[*] Устанавливаем yq..."
+    local arch=$(uname -m)
+    case "$arch" in
+        x86_64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) echo "[×] Неподдерживаемая архитектура: $arch"; exit 1 ;;
+    esac
+    curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${arch}" -o /usr/local/bin/yq
+    chmod +x /usr/local/bin/yq
+fi
+echo "[✓] yq готов."
+
 # --- acme.sh ---
 if [[ ! -x /root/.acme.sh/acme.sh ]]; then
     echo "[*] Устанавливаем acme.sh..."
@@ -219,73 +233,45 @@ systemctl enable nginx
 systemctl restart nginx
 
 # --- Монтирование сертификатов в контейнер remnanode ---
-add_mount_to_remnanode() {
-    local compose_file="/opt/remnanode/docker-compose.yml"
-    if [[ ! -f "$compose_file" ]]; then
-        echo "[!] $compose_file не найден. Монтирование пропущено."
-        return 1
-    fi
-    echo "[*] Проверяем монтирование сертификатов в remnanode..."
-    local mount_cert="      - /etc/ssl/certs/noctua.crt:/etc/ssl/certs/noctua.crt:ro"
-    local mount_key="      - /etc/ssl/private/noctua.key:/etc/ssl/private/noctua.key:ro"
-
-    if grep -q "$mount_cert" "$compose_file" && grep -q "$mount_key" "$compose_file"; then
-        echo "[✓] Монтирование сертификатов уже присутствует в remnanode."
-        return 0
-    fi
-
-    echo "[*] Добавляем монтирование в $compose_file..."
-    cp "$compose_file" "$compose_file.bak"
-
-    awk -v mount_cert="$mount_cert" -v mount_key="$mount_key" '
-    BEGIN { in_service=0; printed_volumes=0; }
-    {
-        if ($0 ~ /^  remnanode:/) {
-            in_service=1
-            print $0
-            next
-        }
-        if (in_service) {
-            if ($0 ~ /^  / && $0 !~ /^    /) {
-                if (!printed_volumes) {
-                    print "    volumes:"
-                    print mount_cert
-                    print mount_key
-                    printed_volumes=1
-                }
-                print $0
-                in_service=0
-                next
-            }
-            print $0
-            next
-        }
-        print $0
-    }
-    END {
-        if (in_service && !printed_volumes) {
-            print "    volumes:"
-            print mount_cert
-            print mount_key
-        }
-    }
-    ' "$compose_file" > "$compose_file.tmp" && mv "$compose_file.tmp" "$compose_file"
-
-    if ! $DOCKER_COMPOSE -f "$compose_file" config; then
-        echo "[×] Ошибка в $compose_file после добавления монтирования. Восстанавливаем бэкап..."
-        mv "$compose_file.bak" "$compose_file"
-        return 1
-    fi
-    rm -f "$compose_file.bak"
-    echo "[✓] Монтирование сертификатов добавлено в remnanode."
-
-    echo "[*] Перезапускаем remnanode для применения монтирования..."
-    $DOCKER_COMPOSE -f "$compose_file" down
-    $DOCKER_COMPOSE -f "$compose_file" up -d
+local compose_file="/opt/remnanode/docker-compose.yml"
+if [[ ! -f "$compose_file" ]]; then
+    echo "[!] $compose_file не найден. Монтирование пропущено."
+    return 1
+fi
+echo "[*] Проверяем монтирование сертификатов в remnanode..."
+local mount_cert="/etc/ssl/certs/noctua.crt:/etc/ssl/certs/noctua.crt:ro"
+local mount_key="/etc/ssl/private/noctua.key:/etc/ssl/private/noctua.key:ro"
+# Проверяем наличие обоих монтирований
+local existing_cert=$(yq eval ".services.remnanode.volumes[] | select(. == \"$mount_cert\")" "$compose_file")
+local existing_key=$(yq eval ".services.remnanode.volumes[] | select(. == \"$mount_key\")" "$compose_file")
+if [[ -n "$existing_cert" && -n "$existing_key" ]]; then
+    echo "[✓] Монтирование сертификатов уже присутствует в remnanode."
     return 0
-}
-
-add_mount_to_remnanode
+fi
+echo "[*] Добавляем монтирование в $compose_file..."
+cp "$compose_file" "$compose_file.bak"
+# Если секция volumes отсутствует, создаём её
+if ! yq eval '.services.remnanode.volumes' "$compose_file" &>/dev/null; then
+    yq eval '.services.remnanode.volumes = []' -i "$compose_file"
+fi
+# Добавляем отсутствующие монтирования
+if [[ -z "$existing_cert" ]]; then
+    yq eval ".services.remnanode.volumes += [\"$mount_cert\"]" -i "$compose_file"
+fi
+if [[ -z "$existing_key" ]]; then
+    yq eval ".services.remnanode.volumes += [\"$mount_key\"]" -i "$compose_file"
+fi
+# Проверка синтаксиса
+if ! $DOCKER_COMPOSE -f "$compose_file" config >/dev/null 2>&1; then
+    echo "[×] Ошибка в $compose_file после добавления монтирования. Восстанавливаем бэкап..."
+    mv "$compose_file.bak" "$compose_file"
+    return 1
+fi
+rm -f "$compose_file.bak"
+echo "[✓] Монтирование сертификатов добавлено в remnanode."
+echo "[*] Перезапускаем remnanode для применения монтирования..."
+$DOCKER_COMPOSE -f "$compose_file" down
+$DOCKER_COMPOSE -f "$compose_file" up -d
 
 # --- Вывод логов remnanode ---
 echo "[*] Просмотр логов контейнера remnanode (15 секунд)..."

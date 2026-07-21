@@ -1,4 +1,5 @@
 #!/bin/bash
+# возможно сломанная отправка send-xray-logs.sh
 set -o pipefail
 set -e
 

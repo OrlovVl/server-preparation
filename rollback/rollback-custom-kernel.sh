@@ -25,6 +25,20 @@ else
     exit 1
 fi
 
+# --- Установка yq ---
+if ! command -v yq &> /dev/null; then
+    echo "[*] Устанавливаем yq..."
+    local arch=$(uname -m)
+    case "$arch" in
+        x86_64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) echo "[×] Неподдерживаемая архитектура: $arch"; exit 1 ;;
+    esac
+    curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${arch}" -o /usr/local/bin/yq
+    chmod +x /usr/local/bin/yq
+fi
+echo "[✓] yq готов."
+
 # Проверка наличия /opt/remnanode и docker-compose.yml
 if [[ ! -d "/opt/remnanode" || ! -f "/opt/remnanode/docker-compose.yml" ]]; then
     echo "[!] /opt/remnanode/docker-compose.yml не найден. Откат не требуется."
@@ -50,65 +64,22 @@ $DOCKER_COMPOSE down
 # Удаляем строку монтирования
 echo "[*] Удаляем монтирование из docker-compose.yml..."
 cp "$COMPOSE_FILE" "$COMPOSE_FILE.bak"
-sed -i "\|$MOUNT_LINE|d" "$COMPOSE_FILE"
 
-# --- Проверка и удаление пустой секции volumes ---
-# Используем awk, чтобы удалить блок volumes, если в нём не осталось строк с "      - "
-awk '
-BEGIN { in_vol=0; block_start=0; lines=0; has_mount=0 }
-{
-    # Определяем отступы: если строка начинается с "    volumes:", начинаем блок
-    if ($0 ~ /^    volumes:/) {
-        in_vol=1
-        block_start=NR
-        lines=0
-        has_mount=0
-        # Сохраняем строку
-        block[lines++] = $0
-        next
-    }
-    # Если мы внутри блока volumes
-    if (in_vol) {
-        # Проверяем, не закончился ли блок (строка с отступом 2 пробела или меньше)
-        if ($0 ~ /^  / && $0 !~ /^    /) {
-            # Блок закончился, проверяем, были ли монтирования
-            if (has_mount == 0) {
-                # Блок пустой - пропускаем его вывод
-                in_vol=0
-                next
-            } else {
-                # Блок не пустой - выводим сохранённые строки
-                for (i=0; i<lines; i++) print block[i]
-                in_vol=0
-                # Печатаем текущую строку (она уже не принадлежит блоку)
-                print $0
-                next
-            }
-        }
-        # Строка внутри блока
-        block[lines++] = $0
-        if ($0 ~ /^      - /) has_mount=1
-        next
-    }
-    # Если не в блоке, печатаем строку
-    print $0
-}
-END {
-    # Если блок остался открытым до конца файла
-    if (in_vol) {
-        if (has_mount == 0) {
-            # Пустой блок в конце файла - не выводим
-            # Ничего не делаем
-        } else {
-            for (i=0; i<lines; i++) print block[i]
-        }
-    }
-}
-' "$COMPOSE_FILE" > "$COMPOSE_FILE.tmp" && mv "$COMPOSE_FILE.tmp" "$COMPOSE_FILE"
+MOUNT_LINE="/var/lib/remnanode/xray:/usr/local/bin/xray:ro"
+
+# Удаляем конкретное монтирование из списка volumes
+yq eval "del(.services.remnanode.volumes[] | select(. == \"$MOUNT_LINE\"))" -i "$COMPOSE_FILE"
+
+# Если список volumes стал пустым, удаляем всю секцию volumes
+VOLUMES_COUNT=$(yq eval '.services.remnanode.volumes | length' "$COMPOSE_FILE")
+if [[ "$VOLUMES_COUNT" -eq 0 ]]; then
+    yq eval 'del(.services.remnanode.volumes)' -i "$COMPOSE_FILE"
+    echo "[✓] Секция volumes была пустой и удалена."
+fi
 
 # Проверка синтаксиса
-if ! $DOCKER_COMPOSE config; then
-    echo "[×] Ошибка в docker-compose.yml после изменений. Восстанавливаем бэкап..."
+if ! $DOCKER_COMPOSE config >/dev/null 2>&1; then
+    echo "[×] Ошибка в docker-compose.yml после удаления монтирования. Восстанавливаем бэкап..."
     mv "$COMPOSE_FILE.bak" "$COMPOSE_FILE"
     exit 1
 fi

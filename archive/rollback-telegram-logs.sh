@@ -1,4 +1,5 @@
 #!/bin/bash
+# сломанная отправка
 set -o pipefail
 set -e
 

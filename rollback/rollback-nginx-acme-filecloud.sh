@@ -23,6 +23,20 @@ else
     exit 1
 fi
 
+# --- Установка yq ---
+if ! command -v yq &> /dev/null; then
+    echo "[*] Устанавливаем yq..."
+    local arch=$(uname -m)
+    case "$arch" in
+        x86_64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) echo "[×] Неподдерживаемая архитектура: $arch"; exit 1 ;;
+    esac
+    curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${arch}" -o /usr/local/bin/yq
+    chmod +x /usr/local/bin/yq
+fi
+echo "[✓] yq готов."
+
 echo "[*] Откат Nginx + acme + FileCloud..."
 
 # --- 1. Останавливаем и отключаем Nginx ---
@@ -73,22 +87,26 @@ fi
 COMPOSE_FILE="/opt/remnanode/docker-compose.yml"
 if [[ -f "$COMPOSE_FILE" ]]; then
     echo "[*] Проверяем монтирование сертификатов в remnanode..."
-    if grep -q "/etc/ssl/certs/noctua.crt" "$COMPOSE_FILE" || grep -q "/etc/ssl/private/noctua.key" "$COMPOSE_FILE"; then
-        cp "$COMPOSE_FILE" "$COMPOSE_FILE.bak"
-        echo "[*] Удаляем строки монтирования..."
-        sed -i "\|/etc/ssl/certs/noctua.crt|d" "$COMPOSE_FILE"
-        sed -i "\|/etc/ssl/private/noctua.key|d" "$COMPOSE_FILE"
-        echo "[✓] Строки монтирования удалены."
 
-        # Проверяем, пуста ли секция volumes
-        if grep -q "^    volumes:" "$COMPOSE_FILE"; then
-            # Проверяем наличие других монтирований в секции
-            if ! awk '/^    volumes:/,/^  / { if ($0 ~ /^      - /) found=1 } END { exit !found }' "$COMPOSE_FILE"; then
-                sed -i '/^    volumes:/,/^  /d' "$COMPOSE_FILE"
-                echo "[✓] Секция volumes была пустой и удалена."
-            else
-                echo "[✓] Секция volumes содержит другие монтирования, не удаляем."
-            fi
+    MOUNT_CERT="/etc/ssl/certs/noctua.crt:/etc/ssl/certs/noctua.crt:ro"
+    MOUNT_KEY="/etc/ssl/private/noctua.key:/etc/ssl/private/noctua.key:ro"
+
+    # Проверяем наличие любого из монтирований
+    if yq eval ".services.remnanode.volumes[] | select(. == \"$MOUNT_CERT\" or . == \"$MOUNT_KEY\")" "$COMPOSE_FILE" &>/dev/null; then
+        cp "$COMPOSE_FILE" "$COMPOSE_FILE.bak"
+        echo "[*] Удаляем монтирование сертификатов..."
+
+        # Удаляем оба монтирования, если они есть
+        yq eval "del(.services.remnanode.volumes[] | select(. == \"$MOUNT_CERT\"))" -i "$COMPOSE_FILE"
+        yq eval "del(.services.remnanode.volumes[] | select(. == \"$MOUNT_KEY\"))" -i "$COMPOSE_FILE"
+
+        # Если список volumes стал пустым, удаляем всю секцию volumes
+        VOLUMES_COUNT=$(yq eval '.services.remnanode.volumes | length' "$COMPOSE_FILE")
+        if [[ "$VOLUMES_COUNT" -eq 0 ]]; then
+            yq eval 'del(.services.remnanode.volumes)' -i "$COMPOSE_FILE"
+            echo "[✓] Секция volumes была пустой и удалена."
+        else
+            echo "[✓] Секция volumes содержит другие монтирования, не удаляем."
         fi
 
         # Проверяем синтаксис compose-файла
@@ -104,6 +122,11 @@ if [[ -f "$COMPOSE_FILE" ]]; then
                 echo "[*] Перезапускаем remnanode для применения изменений..."
                 $DOCKER_COMPOSE -f "$COMPOSE_FILE" down
                 $DOCKER_COMPOSE -f "$COMPOSE_FILE" up -d
+
+                # --- Вывод логов remnanode ---
+                echo "[*] Просмотр логов контейнера remnanode (15 секунд)..."
+                timeout 15 $DOCKER_COMPOSE -f /opt/remnanode/docker-compose.yml logs -f || true
+                echo "[*] Продолжаем выполнение..."
             else
                 echo "[*] Контейнер remnanode не запущен, перезапуск не требуется."
             fi

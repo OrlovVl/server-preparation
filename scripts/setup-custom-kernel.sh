@@ -33,10 +33,24 @@ cleanup_custom() {
     # Откатываем добавленную секцию volume в docker-compose.yml
     if [[ -f "/opt/remnanode/docker-compose.yml" ]]; then
         COMPOSE_FILE="/opt/remnanode/docker-compose.yml"
-        MOUNT_LINE="      - /var/lib/remnanode/xray:/usr/local/bin/xray:ro"
-        if grep -q "$MOUNT_LINE" "$COMPOSE_FILE"; then
+        ensure_yq
+        MOUNT_LINE="/var/lib/remnanode/xray:/usr/local/bin/xray:ro"
+        # Проверяем наличие монтирования
+        if yq eval ".services.remnanode.volumes[] | select(. == \"$MOUNT_LINE\")" "$COMPOSE_FILE" &>/dev/null; then
             echo "[*] Удаляем монтирование xray из $COMPOSE_FILE"
-            sed -i "\|$MOUNT_LINE|d" "$COMPOSE_FILE"
+            cp "$COMPOSE_FILE" "$COMPOSE_FILE.bak"
+            yq eval "del(.services.remnanode.volumes[] | select(. == \"$MOUNT_LINE\"))" -i "$COMPOSE_FILE"
+            # Если список пуст, удаляем секцию volumes
+            if [[ $(yq eval '.services.remnanode.volumes | length' "$COMPOSE_FILE") -eq 0 ]]; then
+                yq eval 'del(.services.remnanode.volumes)' -i "$COMPOSE_FILE"
+            fi
+            # Проверка синтаксиса
+            if ! $DOCKER_COMPOSE config &>/dev/null 2>&1; then
+                echo "[!] Ошибка после удаления, восстанавливаем бэкап..."
+                mv "$COMPOSE_FILE.bak" "$COMPOSE_FILE"
+            else
+                rm -f "$COMPOSE_FILE.bak"
+            fi
         fi
     fi
 
@@ -77,6 +91,20 @@ for pkg in wget unzip; do
         apt-get install -y "$pkg"
     fi
 done
+
+# --- Установка yq ---
+if ! command -v yq &> /dev/null; then
+    echo "[*] Устанавливаем yq..."
+    local arch=$(uname -m)
+    case "$arch" in
+        x86_64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) echo "[×] Неподдерживаемая архитектура: $arch"; exit 1 ;;
+    esac
+    curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${arch}" -o /usr/local/bin/yq
+    chmod +x /usr/local/bin/yq
+fi
+echo "[✓] yq готов."
 
 # Парсинг аргументов
 KERNEL_VERSION=""
@@ -140,35 +168,27 @@ fi
 chmod +x "$XRAY_BIN"
 rm -f "$ZIP_FILE"
 
-# --- Работа с volume (без yq) ---
+# --- Монтирование Xray в контейнер remnanode ---
 COMPOSE_FILE="docker-compose.yml"
-MOUNT_LINE="      - /var/lib/remnanode/xray:/usr/local/bin/xray:ro"
+MOUNT_LINE="/var/lib/remnanode/xray:/usr/local/bin/xray:ro"
 
 echo "[*] Проверяем наличие монтирования xray..."
 
-if grep -q "$MOUNT_LINE" "$COMPOSE_FILE"; then
+if yq eval ".services.remnanode.volumes[] | select(. == \"$MOUNT_LINE\")" "$COMPOSE_FILE" &>/dev/null; then
     echo "[✓] Монтирование уже присутствует. Пропускаем."
 else
     echo "[*] Добавляем монтирование в docker-compose.yml..."
-
-    # Создаём бэкап
     cp "$COMPOSE_FILE" "$COMPOSE_FILE.bak"
 
-    if grep -q "^    volumes:" "$COMPOSE_FILE"; then
-        # Секция volumes уже есть – добавляем строку в конец блока volumes
-        # Ищем блок от "    volumes:" до следующей строки с отступом 2 пробела (закрытие секции)
-        sed -i "/^    volumes:/,/^  / {
-            /^  / i\\
-$MOUNT_LINE
-        }" "$COMPOSE_FILE"
-    else
-        # Секции volumes нет – дописываем в конец файла
-        echo "    volumes:" >> "$COMPOSE_FILE"
-        echo "$MOUNT_LINE" >> "$COMPOSE_FILE"
+    # Если секция volumes отсутствует, создаём её
+    if ! yq eval '.services.remnanode.volumes' "$COMPOSE_FILE" &>/dev/null; then
+        yq eval '.services.remnanode.volumes = []' -i "$COMPOSE_FILE"
     fi
 
+    yq eval ".services.remnanode.volumes += [\"$MOUNT_LINE\"]" -i "$COMPOSE_FILE"
+
     # Проверяем синтаксис compose-файла
-    if ! $DOCKER_COMPOSE config; then
+    if ! $DOCKER_COMPOSE config >/dev/null 2>&1; then
         echo "[×] Ошибка в docker-compose.yml после добавления volume. Восстанавливаем бэкап..."
         mv "$COMPOSE_FILE.bak" "$COMPOSE_FILE"
         exit 1
