@@ -28,7 +28,7 @@ fi
 # --- Установка yq ---
 if ! command -v yq &> /dev/null; then
     echo "[*] Устанавливаем yq..."
-    local arch=$(uname -m)
+    arch=$(uname -m)
     case "$arch" in
         x86_64) arch="amd64" ;;
         aarch64|arm64) arch="arm64" ;;

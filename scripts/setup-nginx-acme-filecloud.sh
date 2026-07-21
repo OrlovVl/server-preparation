@@ -97,7 +97,7 @@ done
 # --- Установка yq ---
 if ! command -v yq &> /dev/null; then
     echo "[*] Устанавливаем yq..."
-    local arch=$(uname -m)
+    arch=$(uname -m)
     case "$arch" in
         x86_64) arch="amd64" ;;
         aarch64|arm64) arch="arm64" ;;
@@ -233,17 +233,17 @@ systemctl enable nginx
 systemctl restart nginx
 
 # --- Монтирование сертификатов в контейнер remnanode ---
-local compose_file="/opt/remnanode/docker-compose.yml"
+compose_file="/opt/remnanode/docker-compose.yml"
 if [[ ! -f "$compose_file" ]]; then
     echo "[!] $compose_file не найден. Монтирование пропущено."
     return 1
 fi
 echo "[*] Проверяем монтирование сертификатов в remnanode..."
-local mount_cert="/etc/ssl/certs/noctua.crt:/etc/ssl/certs/noctua.crt:ro"
-local mount_key="/etc/ssl/private/noctua.key:/etc/ssl/private/noctua.key:ro"
+mount_cert="/etc/ssl/certs/noctua.crt:/etc/ssl/certs/noctua.crt:ro"
+mount_key="/etc/ssl/private/noctua.key:/etc/ssl/private/noctua.key:ro"
 # Проверяем наличие обоих монтирований
-local existing_cert=$(yq eval ".services.remnanode.volumes[] | select(. == \"$mount_cert\")" "$compose_file")
-local existing_key=$(yq eval ".services.remnanode.volumes[] | select(. == \"$mount_key\")" "$compose_file")
+existing_cert=$(yq eval ".services.remnanode.volumes[] | select(. == \"$mount_cert\")" "$compose_file")
+existing_key=$(yq eval ".services.remnanode.volumes[] | select(. == \"$mount_key\")" "$compose_file")
 if [[ -n "$existing_cert" && -n "$existing_key" ]]; then
     echo "[✓] Монтирование сертификатов уже присутствует в remnanode."
     return 0
