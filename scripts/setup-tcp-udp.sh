@@ -328,6 +328,10 @@ sysctl -p /etc/sysctl.d/99-remnanode.conf || true
 
 # --- Настройка UFW правил ---
 if command -v ufw >/dev/null 2>&1; then
+  # Отключаем UFW, чтобы применить все правила за один раз
+  echo "[*] Отключаем UFW для применения новых правил..."
+  yes | ufw disable 2>/dev/null || true
+
   ufw default deny incoming || true
   ufw default allow outgoing || true
 
@@ -367,31 +371,22 @@ if command -v ufw >/dev/null 2>&1; then
     done
   fi
 
-  # Отключение ICMP
+  # Отключение ICMP – заменяем ACCEPT на DROP
   echo "[*] Настраиваем отключение ICMP (ping) через UFW..."
   if [ -f /etc/ufw/before.rules ]; then
-      # Удаляем только наше правило (с комментарием)
-      sed -i '/# no-icmp-request/d' /etc/ufw/before.rules
-      # Добавляем правило с комментарием
-      if grep -q "^COMMIT" /etc/ufw/before.rules; then
-          sed -i '/^COMMIT/i # no-icmp-request\n-A ufw-before-input -p icmp --icmp-type echo-request -j DROP' /etc/ufw/before.rules
-          echo "[✓] Правило для ICMP добавлено."
-      else
-          echo "[!] COMMIT не найден в /etc/ufw/before.rules. ICMP не отключён."
-      fi
+      # Заменяем точное совпадение строки ACCEPT на DROP
+      sed -i 's/^-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT$/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/' /etc/ufw/before.rules
+      echo "[✓] Правило ICMP изменено на DROP."
   else
-      echo "[!] /etc/ufw/before.rules не найден. ICMP не отключён."
+      echo "[!] /etc/ufw/before.rules не найден."
   fi
 
-  if yes | ufw enable; then
-    echo "[✓] UFW включён."
+  # Включаем UFW (правила применятся автоматически)
+  echo "[*] Включаем UFW..."
+  if ufw -f enable || yes | ufw enable; then
+      echo "[✓] UFW включён и все правила применены."
   else
-    echo "[!] Не удалось включить UFW (возможно, уже включён)."
-  fi
-  if ufw reload; then
-    echo "[✓] Правила UFW перезагружены."
-  else
-    echo "[!] Ошибка при перезагрузке UFW. Проверьте правила вручную."
+      echo "[!] Не удалось включить UFW. Проверьте вручную."
   fi
 else
   echo "[×] UFW не установлен. Пропускаем настройку файрвола."
