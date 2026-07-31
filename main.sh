@@ -57,25 +57,53 @@ run_script() {
 
 # --- Функции запроса параметров ---
 ask_secret_key() {
+    local secret
     read -p "Введите SECRET_KEY для ноды: " secret
-    echo "$secret"
+    echo "--secret-key \"$secret\""
 }
 
 ask_kernel_version() {
+    local version
     read -p "Введите версию Xray-core (например, 26.6.27): " version
-    echo "$version"
+    echo "--version \"$version\""
 }
 
 ask_tcp_ports() {
+    local ports
     read -p "Введите дополнительные TCP-порты через запятую (например, 8080,8443) или оставьте пустым: " ports
-    echo "$ports"
+    if [[ -n "$ports" ]]; then
+        echo "--tcp-ports \"$ports\""
+    else
+        echo ""
+    fi
 }
 
 ask_udp_ports() {
+    local ports
     read -p "Введите дополнительные UDP-порты через запятую (например, 53,123) или оставьте пустым: " ports
-    echo "$ports"
+    if [[ -n "$ports" ]]; then
+        echo "--udp-ports \"$ports\""
+    else
+        echo ""
+    fi
 }
 
+ask_swap_size() {
+    local size
+    read -p "Введите размер SWAP в ГБ (по умолчанию 2, оставьте пустым для 2 ГБ): " size
+    if [[ -n "$size" ]]; then
+        if [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -gt 0 ]; then
+            echo "--swap-size \"$size\""
+        else
+            echo "[!] Некорректный размер, используем значение по умолчанию (2 ГБ)." >&2
+            echo ""
+        fi
+    else
+        echo ""
+    fi
+}
+
+# ask_domain и ask_email возвращают только значения (для совместимости с вызовами)
 ask_domain() {
     read -p "Введите домен для сертификата (например, example.com): " domain
     echo "$domain"
@@ -84,7 +112,8 @@ ask_domain() {
 ask_email() {
     local domain="$1"
     read -p "Введите email для Let's Encrypt (оставьте пустым для admin@$domain): " email
-    [[ -z "$email" ]] && echo "admin@$domain" || echo "$email"
+    [[ -z "$email" ]] && email="admin@$domain"
+    echo "$email"
 }
 
 # --- КОМПЛЕКСНЫЕ НАСТРОЙКИ ---
@@ -92,27 +121,21 @@ ask_email() {
 # 1. TCP (без заглушки)
 full_setup_tcp() {
     echo "[*] Комплексная настройка: обновление + нода + TCP-оптимизация + ротация логов + очистка"
-    local secret=$(ask_secret_key)
-    local tcp_ports=$(ask_tcp_ports)
+    local secret_args=$(ask_secret_key)
+    local tcp_args=$(ask_tcp_ports)
+    local swap_args=$(ask_swap_size)
     run_script "${SCRIPTS_BASE}/init-server.sh" || {
         echo "[×] Ошибка на этапе init-server.sh. Прерываем."
         return 1
     }
-    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret" || {
+    run_script "${SCRIPTS_BASE}/setup-node.sh" "$secret_args" || {
         echo "[×] Ошибка на этапе setup-node.sh. Прерываем."
         return 1
     }
-    if [ -n "$tcp_ports" ]; then
-        run_script "${SCRIPTS_BASE}/setup-tcp.sh" "--tcp-ports $tcp_ports" || {
-            echo "[×] Ошибка на этапе setup-tcp.sh. Прерываем."
-            return 1
-        }
-    else
-        run_script "${SCRIPTS_BASE}/setup-tcp.sh" || {
-            echo "[×] Ошибка на этапе setup-tcp.sh. Прерываем."
-            return 1
-        }
-    fi
+    run_script "${SCRIPTS_BASE}/setup-tcp.sh" "$tcp_args $swap_args" || {
+        echo "[×] Ошибка на этапе setup-tcp.sh. Прерываем."
+        return 1
+    }
     run_script "${SCRIPTS_BASE}/setup-log-rotation.sh" || {
         echo "[×] Ошибка при настройке ротации логов."
         return 1
@@ -126,7 +149,7 @@ full_setup_tcp() {
     echo ""
     echo "[✓] Комплексная настройка TCP завершена."
     echo "Для отката используйте пункт меню 5."
-    echo "Для удаления ноды используйте пункт 19."
+    echo "Для удаления ноды используйте пункт 21."
     read -p "Нажмите Enter для продолжения..."
     return 0
 }
@@ -134,21 +157,19 @@ full_setup_tcp() {
 # 2. TCP/UDP (без заглушки)
 full_setup_tcp_udp() {
     echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация + ротация логов + очистка"
-    local secret=$(ask_secret_key)
-    local tcp_ports=$(ask_tcp_ports)
-    local udp_ports=$(ask_udp_ports)
-    local args=""
-    [ -n "$tcp_ports" ] && args="$args --tcp-ports $tcp_ports"
-    [ -n "$udp_ports" ] && args="$args --udp-ports $udp_ports"
+    local secret_args=$(ask_secret_key)
+    local tcp_args=$(ask_tcp_ports)
+    local udp_args=$(ask_udp_ports)
+    local swap_args=$(ask_swap_size)
     run_script "${SCRIPTS_BASE}/init-server.sh" || {
         echo "[×] Ошибка на этапе init-server.sh. Прерываем."
         return 1
     }
-    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret" || {
+    run_script "${SCRIPTS_BASE}/setup-node.sh" "$secret_args" || {
         echo "[×] Ошибка на этапе setup-node.sh. Прерываем."
         return 1
     }
-    run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args" || {
+    run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$tcp_args $udp_args $swap_args" || {
         echo "[×] Ошибка на этапе setup-tcp-udp.sh. Прерываем."
         return 1
     }
@@ -165,7 +186,7 @@ full_setup_tcp_udp() {
     echo ""
     echo "[✓] Комплексная настройка TCP/UDP завершена."
     echo "Для отката используйте пункт меню 6."
-    echo "Для удаления ноды используйте пункт 19."
+    echo "Для удаления ноды используйте пункт 21."
     read -p "Нажмите Enter для продолжения..."
     return 0
 }
@@ -173,29 +194,23 @@ full_setup_tcp_udp() {
 # 3. TCP + Nginx + acme (заглушка)
 full_setup_tcp_nginx() {
     echo "[*] Комплексная настройка: обновление + нода + TCP-оптимизация + Nginx + acme + ротация логов + очистка"
-    local secret=$(ask_secret_key)
-    local tcp_ports=$(ask_tcp_ports)
+    local secret_args=$(ask_secret_key)
+    local tcp_args=$(ask_tcp_ports)
+    local swap_args=$(ask_swap_size)
     local domain=$(ask_domain)
     local email=$(ask_email "$domain")
     run_script "${SCRIPTS_BASE}/init-server.sh" || {
         echo "[×] Ошибка на этапе init-server.sh. Прерываем."
         return 1
     }
-    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret" || {
+    run_script "${SCRIPTS_BASE}/setup-node.sh" "$secret_args" || {
         echo "[×] Ошибка на этапе setup-node.sh. Прерываем."
         return 1
     }
-    if [ -n "$tcp_ports" ]; then
-        run_script "${SCRIPTS_BASE}/setup-tcp.sh" "--tcp-ports $tcp_ports" || {
-            echo "[×] Ошибка на этапе setup-tcp.sh. Прерываем."
-            return 1
-        }
-    else
-        run_script "${SCRIPTS_BASE}/setup-tcp.sh" || {
-            echo "[×] Ошибка на этапе setup-tcp.sh. Прерываем."
-            return 1
-        }
-    fi
+    run_script "${SCRIPTS_BASE}/setup-tcp.sh" "$tcp_args $swap_args" || {
+        echo "[×] Ошибка на этапе setup-tcp.sh. Прерываем."
+        return 1
+    }
     run_script "${SCRIPTS_BASE}/setup-nginx-acme-filecloud.sh" "--domain $domain --email $email" || {
         echo "[×] Ошибка на этапе setup-nginx-acme-filecloud.sh. Прерываем."
         return 1
@@ -213,7 +228,7 @@ full_setup_tcp_nginx() {
     echo ""
     echo "[✓] Комплексная настройка TCP + Nginx завершена."
     echo "Для отката используйте пункт меню 7."
-    echo "Для удаления ноды используйте пункт 19."
+    echo "Для удаления ноды используйте пункт 21."
     read -p "Нажмите Enter для продолжения..."
     return 0
 }
@@ -221,23 +236,21 @@ full_setup_tcp_nginx() {
 # 4. TCP/UDP + Nginx + acme (заглушка)
 full_setup_tcp_udp_nginx() {
     echo "[*] Комплексная настройка: обновление + нода + TCP/UDP-оптимизация + Nginx + acme + ротация логов + очистка"
-    local secret=$(ask_secret_key)
-    local tcp_ports=$(ask_tcp_ports)
-    local udp_ports=$(ask_udp_ports)
+    local secret_args=$(ask_secret_key)
+    local tcp_args=$(ask_tcp_ports)
+    local udp_args=$(ask_udp_ports)
+    local swap_args=$(ask_swap_size)
     local domain=$(ask_domain)
     local email=$(ask_email "$domain")
-    local args=""
-    [ -n "$tcp_ports" ] && args="$args --tcp-ports $tcp_ports"
-    [ -n "$udp_ports" ] && args="$args --udp-ports $udp_ports"
     run_script "${SCRIPTS_BASE}/init-server.sh" || {
         echo "[×] Ошибка на этапе init-server.sh. Прерываем."
         return 1
     }
-    run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret" || {
+    run_script "${SCRIPTS_BASE}/setup-node.sh" "$secret_args" || {
         echo "[×] Ошибка на этапе setup-node.sh. Прерываем."
         return 1
     }
-    run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args" || {
+    run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$tcp_args $udp_args $swap_args" || {
         echo "[×] Ошибка на этапе setup-tcp-udp.sh. Прерываем."
         return 1
     }
@@ -258,7 +271,7 @@ full_setup_tcp_udp_nginx() {
     echo ""
     echo "[✓] Комплексная настройка TCP/UDP + Nginx завершена."
     echo "Для отката используйте пункт меню 8."
-    echo "Для удаления ноды используйте пункт 19."
+    echo "Для удаления ноды используйте пункт 21."
     read -p "Нажмите Enter для продолжения..."
     return 0
 }
@@ -377,8 +390,8 @@ while true; do
     echo "  9. Базовая подготовка сервера (обновление + Docker)"
     echo " 10. Установка ноды (RemnaNode)"
     echo " 11. Установка кастомного Xray-core"
-    echo " 12. Настройка TCP-оптимизации (с доп. портами)"
-    echo " 13. Настройка TCP/UDP-оптимизации (с доп. портами)"
+    echo " 12. Настройка TCP-оптимизации (с доп. портами и размером SWAP)"
+    echo " 13. Настройка TCP/UDP-оптимизации (с доп. портами и размером SWAP)"
     echo " 14. Настройка Nginx + acme (заглушка)"
     echo " 15. Настройка ротации логов (Docker logging)"
     echo " 16. Настройка cron-очистки системы"
@@ -408,10 +421,10 @@ while true; do
         7) rollback_tcp_nginx ;;
         8) rollback_tcp_udp_nginx ;;
         9) run_script "${SCRIPTS_BASE}/init-server.sh" || echo "[×] Ошибка при выполнении init-server.sh."; read -p "Нажмите Enter..." ;;
-        10) secret=$(ask_secret_key); run_script "${SCRIPTS_BASE}/setup-node.sh" "--secret-key $secret" || echo "[×] Ошибка при установке ноды."; read -p "Нажмите Enter..." ;;
-        11) version=$(ask_kernel_version); run_script "${SCRIPTS_BASE}/setup-custom-kernel.sh" "--version $version" || echo "[×] Ошибка при установке кастомного Xray-core."; read -p "Нажмите Enter..." ;;
-        12) tcp_ports=$(ask_tcp_ports); [ -n "$tcp_ports" ] && args="--tcp-ports $tcp_ports" || args=""; run_script "${SCRIPTS_BASE}/setup-tcp.sh" "$args" || echo "[×] Ошибка при настройке TCP."; read -p "Нажмите Enter..." ;;
-        13) tcp_ports=$(ask_tcp_ports); udp_ports=$(ask_udp_ports); args=""; [ -n "$tcp_ports" ] && args="$args --tcp-ports $tcp_ports"; [ -n "$udp_ports" ] && args="$args --udp-ports $udp_ports"; run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$args" || echo "[×] Ошибка при настройке TCP/UDP."; read -p "Нажмите Enter..." ;;
+        10) secret_args=$(ask_secret_key); run_script "${SCRIPTS_BASE}/setup-node.sh" "$secret_args" || echo "[×] Ошибка при установке ноды."; read -p "Нажмите Enter..." ;;
+        11) kernel_args=$(ask_kernel_version); run_script "${SCRIPTS_BASE}/setup-custom-kernel.sh" "$kernel_args" || echo "[×] Ошибка при установке кастомного Xray-core."; read -p "Нажмите Enter..." ;;
+        12) tcp_args=$(ask_tcp_ports); swap_args=$(ask_swap_size); run_script "${SCRIPTS_BASE}/setup-tcp.sh" "$tcp_args $swap_args" || echo "[×] Ошибка при настройке TCP."; read -p "Нажмите Enter..." ;;
+        13) tcp_args=$(ask_tcp_ports); udp_args=$(ask_udp_ports); swap_args=$(ask_swap_size); run_script "${SCRIPTS_BASE}/setup-tcp-udp.sh" "$tcp_args $udp_args $swap_args" || echo "[×] Ошибка при настройке TCP/UDP."; read -p "Нажмите Enter..." ;;
         14) domain=$(ask_domain); email=$(ask_email "$domain"); run_script "${SCRIPTS_BASE}/setup-nginx-acme-filecloud.sh" "--domain $domain --email $email" || echo "[×] Ошибка при настройке Nginx+acme."; read -p "Нажмите Enter..." ;;
         15) run_script "${SCRIPTS_BASE}/setup-log-rotation.sh" || echo "[×] Ошибка при настройке ротации логов."; read -p "Нажмите Enter..." ;;
         16) run_script "${SCRIPTS_BASE}/setup-cleanup-cron.sh" || echo "[×] Ошибка при настройке cron-очистки."; read -p "Нажмите Enter..." ;;

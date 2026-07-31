@@ -200,6 +200,10 @@ while [[ $# -gt 0 ]]; do
       UDP_PORTS="$2"
       shift 2
       ;;
+    --swap-size)
+      SWAP_SIZE="$2"
+      shift 2
+      ;;
     *)
       echo "[×] Неизвестный параметр: $1"
       echo "Использование: $0 [--tcp-ports 'порт1,...'] [--udp-ports 'порт1,...']"
@@ -221,7 +225,7 @@ for pkg in ufw curl wget; do
 done
 
 # --- SWAP ---
-TARGET_SWAP_GB=2
+TARGET_SWAP_GB=${SWAP_SIZE:-2}
 TARGET_SWAP_MB=$((TARGET_SWAP_GB * 1024))
 SWAP_FILE="/swapfile"
 CREATE_SWAP=true
